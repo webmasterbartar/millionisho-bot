@@ -1,246 +1,194 @@
-import os
-import json
 import logging
-import asyncio
-from datetime import datetime, timedelta
+import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
-from telegram.constants import ParseMode
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters,
+)
 from openai import OpenAI
-from cachetools import TTLCache
 import aiohttp
-import signal
 from config import (
     TELEGRAM_TOKEN,
     OPENAI_API_KEY,
-    WORDPRESS_BASE_URL,
-    PROXY_URL,
-    CACHE_TTL,
-    CACHE_MAX_SIZE
+    WORDPRESS_BASE_URL
 )
 
 # Configure logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO,
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('bot.log')
-    ]
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
-
-# States for conversation handler
-MAIN_MENU, LICENSE_INPUT, CHAT_STATE = range(3)
-
-# Cache for storing user license status
-license_cache = TTLCache(maxsize=CACHE_MAX_SIZE, ttl=CACHE_TTL)
 
 # Initialize OpenAI client
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Global variables
-application = None
-is_running = False
+# Dictionary to store user states
+user_states = {}
+
+# Dictionary to store user licenses
+user_licenses = {}
 
 async def verify_license(license_key: str) -> bool:
     """Verify license key with WordPress site."""
     url = f"{WORDPRESS_BASE_URL}/wp-json/millionisho/v1/verify-license"
-    headers = {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-    }
-    data = {
-        'license_key': license_key
-    }
     
-    logger.info(f"Verifying license at URL: {url}")
     try:
-        timeout = aiohttp.ClientTimeout(total=10)  # 10 seconds timeout
+        timeout = aiohttp.ClientTimeout(total=10)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(url, json=data, headers=headers) as response:
-                logger.info(f"License verification response status: {response.status}")
-                response_text = await response.text()
-                logger.info(f"License verification response: {response_text}")
-                
+            async with session.post(
+                url,
+                json={'license_key': license_key},
+                headers={'Content-Type': 'application/json'}
+            ) as response:
                 if response.status == 200:
-                    try:
-                        data = json.loads(response_text)
-                        is_valid = data.get('valid', False)
-                        logger.info(f"License is valid: {is_valid}")
-                        return is_valid
-                    except json.JSONDecodeError as e:
-                        logger.error(f"Error parsing JSON response: {e}")
-                        return False
-                else:
-                    logger.error(f"Error response from WordPress: {response.status}")
-                    return False
-    except asyncio.TimeoutError:
-        logger.error("License verification timeout")
-        return False
+                    data = await response.json()
+                    return data.get('valid', False)
+                return False
     except Exception as e:
-        logger.error(f"Error verifying license: {str(e)}")
+        logger.error(f"License verification error: {e}")
         return False
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the /start command."""
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /start command."""
     keyboard = [
         [
             InlineKeyboardButton("وارد کردن لایسنس 🔑", callback_data="license"),
-            InlineKeyboardButton("صحبت با هوش مصنوعی 🤖", callback_data="chat")
+            InlineKeyboardButton("چت با هوش مصنوعی 🤖", callback_data="chat")
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
+    
     await update.message.reply_text(
-        "به ربات میلیونی‌شو خوش آمدید! 👋\nلطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
+        "به ربات میلیونی‌شو خوش آمدید! 👋\n"
+        "لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
         reply_markup=reply_markup
     )
 
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle button callbacks."""
+async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle button clicks."""
     query = update.callback_query
+    user_id = str(update.effective_user.id)
+    
     await query.answer()
     
     if query.data == "license":
-        await query.message.reply_text("لطفاً کد لایسنس خود را وارد کنید:")
-        context.user_data['state'] = LICENSE_INPUT
+        user_states[user_id] = "awaiting_license"
+        await query.message.reply_text(
+            "لطفاً کد لایسنس خود را وارد کنید:"
+        )
+    
     elif query.data == "chat":
-        user_id = str(query.from_user.id)
-        if user_id in license_cache and license_cache[user_id]:
-            await query.message.reply_text("لطفاً سوال خود را بپرسید:")
-            context.user_data['state'] = CHAT_STATE
+        if user_id in user_licenses and user_licenses[user_id]:
+            user_states[user_id] = "chatting"
+            await query.message.reply_text(
+                "لطفاً سؤال خود را بپرسید. من با کمک GPT-4 به شما پاسخ خواهم داد."
+            )
         else:
             await query.message.reply_text(
                 "برای استفاده از این بخش نیاز به لایسنس معتبر دارید.\n"
-                "از دکمه «وارد کردن لایسنس 🔑» استفاده کنید."
+                "لطفاً ابتدا لایسنس خود را وارد کنید."
             )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle regular messages."""
-    if 'state' not in context.user_data:
-        await start(update, context)
+    """Handle user messages."""
+    user_id = str(update.effective_user.id)
+    message_text = update.message.text
+    
+    if user_id not in user_states:
+        await start_command(update, context)
         return
-
-    if context.user_data['state'] == LICENSE_INPUT:
-        license_key = update.message.text.strip()
-        if not license_key:
-            await update.message.reply_text("لطفاً یک کد لایسنس معتبر وارد کنید.")
-            return
-            
-        logger.info(f"Received license key: {license_key}")
-        is_valid = await verify_license(license_key)
+    
+    state = user_states[user_id]
+    
+    if state == "awaiting_license":
+        # Handle license verification
+        is_valid = await verify_license(message_text)
         if is_valid:
-            user_id = str(update.message.from_user.id)
-            license_cache[user_id] = True
+            user_licenses[user_id] = True
+            user_states[user_id] = "chatting"
             await update.message.reply_text(
-                "لایسنس شما با موفقیت تایید شد! ✅\n"
-                "حالا می‌توانید از بخش «صحبت با هوش مصنوعی 🤖» استفاده کنید."
+                "✅ لایسنس شما با موفقیت تأیید شد!\n"
+                "حالا می‌توانید از بخش چت با هوش مصنوعی استفاده کنید."
             )
-            await start(update, context)
-            context.user_data['state'] = None
+            # Show main menu again
+            await start_command(update, context)
         else:
             await update.message.reply_text(
-                "لایسنس نامعتبر است. لطفاً مطمئن شوید که کد را درست وارد کرده‌اید و دوباره تلاش کنید."
+                "❌ لایسنس نامعتبر است.\n"
+                "لطفاً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید."
             )
-    elif context.user_data['state'] == CHAT_STATE:
-        user_id = str(update.message.from_user.id)
-        if user_id not in license_cache or not license_cache[user_id]:
-            await update.message.reply_text("لایسنس شما منقضی شده است. لطفاً دوباره لایسنس خود را وارد کنید.")
-            context.user_data['state'] = None
-            await start(update, context)
+    
+    elif state == "chatting":
+        if not user_licenses.get(user_id):
+            await update.message.reply_text(
+                "⚠️ لایسنس شما منقضی شده است.\n"
+                "لطفاً دوباره لایسنس خود را وارد کنید."
+            )
+            user_states[user_id] = "awaiting_license"
             return
-            
+        
+        # Handle chat with GPT
         try:
-            await update.message.reply_text("در حال پردازش درخواست شما...")
+            await update.message.reply_text("🤔 در حال پردازش سؤال شما...")
+            
             response = client.chat.completions.create(
                 model="gpt-4",
                 messages=[
-                    {"role": "system", "content": "You are a helpful assistant. Please respond in Persian (Farsi) language."},
-                    {"role": "user", "content": update.message.text}
+                    {
+                        "role": "system",
+                        "content": "You are a helpful assistant. Please respond in Persian (Farsi) language."
+                    },
+                    {
+                        "role": "user",
+                        "content": message_text
+                    }
                 ],
                 temperature=0.7,
                 max_tokens=2000
             )
+            
             await update.message.reply_text(response.choices[0].message.content)
+            
         except Exception as e:
-            logger.error(f"Error in GPT response: {e}")
+            logger.error(f"GPT error: {e}")
             await update.message.reply_text(
-                "متأسفانه در پردازش درخواست شما مشکلی پیش آمد.\n"
-                "لطفاً چند لحظه دیگر دوباره تلاش کنید."
+                "❌ متأسفانه در پردازش درخواست شما مشکلی پیش آمد.\n"
+                "لطفاً چند دقیقه دیگر دوباره تلاش کنید."
             )
 
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle errors in the telegram bot."""
-    logger.error(f"Exception while handling an update: {context.error}")
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle errors."""
+    logger.error(f"Error: {context.error}")
     try:
         if update and update.effective_message:
             await update.effective_message.reply_text(
-                "متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید."
+                "❌ متأسفانه خطایی رخ داد.\n"
+                "لطفاً دوباره تلاش کنید."
             )
-    except Exception as e:
-        logger.error(f"Error in error handler: {e}")
+    except:
+        pass
 
-async def shutdown():
-    """Cleanup and shutdown the bot gracefully."""
-    global application, is_running
-    
-    if application and is_running:
-        logger.info("Stopping bot...")
-        is_running = False
-        try:
-            if application.running:
-                await application.stop()
-            logger.info("Bot stopped successfully")
-        except Exception as e:
-            logger.error(f"Error during shutdown: {e}")
-
-def signal_handler(signum, frame):
-    """Handle system signals for graceful shutdown."""
-    logger.info(f"Received signal {signum}")
-    if asyncio.get_event_loop().is_running():
-        asyncio.create_task(shutdown())
-
-async def main() -> None:
+def main():
     """Start the bot."""
-    global application, is_running
+    # Create application
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
     
-    try:
-        # Build the application with proxy if configured
-        builder = Application.builder().token(TELEGRAM_TOKEN)
-        if PROXY_URL:
-            builder.proxy_url(PROXY_URL)
-        application = builder.build()
-
-        # Add handlers
-        application.add_handler(CommandHandler("start", start))
-        application.add_handler(CallbackQueryHandler(button_callback))
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        application.add_error_handler(error_handler)
-
-        # Set up signal handlers
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
-
-        # Start the bot
-        logger.info("Starting bot...")
-        is_running = True
-        
-        # Run the bot until a stop signal is received
-        await application.run_polling(
-            allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True,
-            close_loop=False
-        )
-
-    except Exception as e:
-        logger.error(f"Error running bot: {e}")
-    finally:
-        await shutdown()
+    # Add handlers
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CallbackQueryHandler(handle_button))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    # Add error handler
+    application.add_error_handler(error_handler)
+    
+    # Start the bot
+    logger.info("Starting bot...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
-    except Exception as e:
-        logger.error(f"Bot stopped due to error: {e}")
+    main()
