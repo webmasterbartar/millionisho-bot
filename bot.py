@@ -1,12 +1,15 @@
 import os
 import json
 import logging
+import asyncio
+from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from telegram.constants import ParseMode
 from openai import OpenAI
 from cachetools import TTLCache
 import aiohttp
+import signal
 
 # Configure logging
 logging.basicConfig(
@@ -29,18 +32,59 @@ license_cache = TTLCache(maxsize=1000, ttl=3600)
 # Initialize OpenAI client
 client = OpenAI(api_key=OPENAI_API_KEY)
 
+# Global session lock
+session_lock = asyncio.Lock()
+cleanup_lock = asyncio.Lock()
+is_shutting_down = False
+
+async def cleanup_webhook():
+    """Clean up webhook and session."""
+    async with cleanup_lock:
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/deleteWebhook?drop_pending_updates=true"
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        logger.info("Successfully cleaned up webhook")
+                    else:
+                        logger.error(f"Failed to clean up webhook: {response.status}")
+        except Exception as e:
+            logger.error(f"Error during webhook cleanup: {e}")
+
 async def verify_license(license_key: str) -> bool:
     """Verify license key with WordPress site."""
     url = f"{WORDPRESS_BASE_URL}/wp-json/millionisho/v1/verify-license"
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+    }
+    data = {
+        'license_key': license_key
+    }
+    
+    logger.info(f"Verifying license at URL: {url}")
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, json={'license_key': license_key}) as response:
+            async with session.post(url, json=data, headers=headers) as response:
+                logger.info(f"License verification response status: {response.status}")
+                response_text = await response.text()
+                logger.info(f"License verification response: {response_text}")
+                
                 if response.status == 200:
-                    data = await response.json()
-                    return data.get('valid', False)
+                    try:
+                        data = json.loads(response_text)
+                        is_valid = data.get('valid', False)
+                        logger.info(f"License is valid: {is_valid}")
+                        return is_valid
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Error parsing JSON response: {e}")
+                        return False
+                else:
+                    logger.error(f"Error response from WordPress: {response.status}")
+                    return False
     except Exception as e:
-        logger.error(f"Error verifying license: {e}")
-    return False
+        logger.error(f"Error verifying license: {str(e)}")
+        return False
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the /start command."""
@@ -65,7 +109,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("لطفاً کد لایسنس خود را وارد کنید:")
         context.user_data['state'] = LICENSE_INPUT
     elif query.data == "chat":
-        # Check if user has valid license
         user_id = str(query.from_user.id)
         if user_id in license_cache and license_cache[user_id]:
             await query.message.reply_text("لطفاً سوال خود را بپرسید:")
@@ -81,6 +124,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if context.user_data['state'] == LICENSE_INPUT:
         license_key = update.message.text
+        logger.info(f"Received license key: {license_key}")
         is_valid = await verify_license(license_key)
         if is_valid:
             user_id = str(update.message.from_user.id)
@@ -88,9 +132,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("لایسنس شما با موفقیت تایید شد! ✅")
             context.user_data['state'] = None
         else:
-            await update.message.reply_text("لایسنس نامعتبر است. لطفاً دوباره تلاش کنید.")
+            await update.message.reply_text("لایسنس نامعتبر است. لطفاً مطمئن شوید که کد را درست وارد کرده‌اید و دوباره تلاش کنید.")
     elif context.user_data['state'] == CHAT_STATE:
-        # Handle chat with GPT
         try:
             response = client.chat.completions.create(
                 model="gpt-4",
@@ -101,11 +144,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Error in GPT response: {e}")
             await update.message.reply_text("متأسفانه در پردازش درخواست شما مشکلی پیش آمد. لطفاً دوباره تلاش کنید.")
 
-def main():
-    """Run the bot."""
-    print("Starting bot...")
+async def shutdown(application: Application):
+    """Cleanup and shutdown the bot gracefully."""
+    global is_shutting_down
+    is_shutting_down = True
     
-    # Initialize bot
+    logger.info("Starting graceful shutdown...")
+    await cleanup_webhook()
+    
+    # Stop accepting new updates
+    application.stop_running()
+    logger.info("Bot shutdown complete")
+
+def signal_handler(signum, frame):
+    """Handle system signals for graceful shutdown."""
+    logger.info(f"Received signal {signum}")
+    if not is_shutting_down:
+        asyncio.create_task(shutdown(application))
+
+async def main():
+    """Run the bot."""
+    global application
+    
+    # Clean up any existing webhook
+    await cleanup_webhook()
+    
+    logger.info("Starting bot...")
+    logger.info(f"WordPress API URL: {WORDPRESS_BASE_URL}")
+    
+    # Initialize bot with proper shutdown
     application = (
         Application.builder()
         .token(TELEGRAM_TOKEN)
@@ -117,8 +184,21 @@ def main():
     application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Start the bot
-    application.run_polling(drop_pending_updates=True)
+    # Set up signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    # Start the bot with proper cleanup
+    await application.initialize()
+    await application.start()
+    await application.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
-    main()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Bot stopped due to error: {e}")
+    finally:
+        logger.info("Bot shutdown complete")
