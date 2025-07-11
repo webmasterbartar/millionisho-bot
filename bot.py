@@ -34,19 +34,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 
 # Global variables
 application = None
-
-async def cleanup_webhook():
-    """Clean up webhook and session."""
-    try:
-        async with aiohttp.ClientSession() as session:
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/deleteWebhook?drop_pending_updates=true"
-            async with session.get(url) as response:
-                if response.status == 200:
-                    logger.info("Successfully cleaned up webhook")
-                else:
-                    logger.error(f"Failed to clean up webhook: {response.status}")
-    except Exception as e:
-        logger.error(f"Error during webhook cleanup: {e}")
+should_stop = False
 
 async def verify_license(license_key: str) -> bool:
     """Verify license key with WordPress site."""
@@ -141,78 +129,50 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Error in GPT response: {e}")
             await update.message.reply_text("متأسفانه در پردازش درخواست شما مشکلی پیش آمد. لطفاً دوباره تلاش کنید.")
 
-def signal_handler(signum, frame):
-    """Handle system signals for graceful shutdown."""
-    logger.info(f"Received signal {signum}")
-    # Create a new event loop for the shutdown process
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(shutdown())
-    finally:
-        loop.close()
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle errors in the telegram bot."""
+    logger.error(f"Exception while handling an update: {context.error}")
 
-async def shutdown():
-    """Cleanup and shutdown the bot gracefully."""
+def stop_bot(signum, frame):
+    """Signal handler to stop the bot."""
+    global should_stop
+    logger.info("Received stop signal")
+    should_stop = True
+
+async def main() -> None:
+    """Start the bot."""
     global application
     
-    if application:
-        logger.info("Starting graceful shutdown...")
-        try:
-            await cleanup_webhook()
-            await application.stop()
-            await application.shutdown()
-            logger.info("Bot shutdown complete")
-        except Exception as e:
-            logger.error(f"Error during shutdown: {e}")
-
-async def run_bot():
-    """Run the bot with proper initialization and shutdown."""
-    global application
+    # Set up signal handlers
+    signal.signal(signal.SIGINT, stop_bot)
+    signal.signal(signal.SIGTERM, stop_bot)
     
     try:
-        # Clean up any existing webhook
-        await cleanup_webhook()
-        
-        logger.info("Starting bot...")
-        logger.info(f"WordPress API URL: {WORDPRESS_BASE_URL}")
-        
-        # Initialize bot
-        application = (
-            Application.builder()
-            .token(TELEGRAM_TOKEN)
-            .build()
-        )
+        # Build the application
+        application = Application.builder().token(TELEGRAM_TOKEN).build()
 
         # Add handlers
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CallbackQueryHandler(button_callback))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-        # Set up signal handlers
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
+        application.add_error_handler(error_handler)
 
         # Start the bot
+        logger.info("Starting bot...")
         await application.initialize()
         await application.start()
         await application.run_polling(drop_pending_updates=True)
-        
-    except Exception as e:
-        logger.error(f"Error in main loop: {e}")
-        await shutdown()
 
-def main():
-    """Main entry point of the bot."""
-    try:
-        # Create and set the event loop
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(run_bot())
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
     except Exception as e:
-        logger.error(f"Bot stopped due to error: {e}")
+        logger.error(f"Error running bot: {e}")
+    finally:
+        # Proper cleanup
+        if application:
+            logger.info("Stopping bot...")
+            await application.stop()
+            await application.shutdown()
+            logger.info("Bot stopped successfully")
 
 if __name__ == '__main__':
-    main()
+    try:
+        asyncio.run(main())
