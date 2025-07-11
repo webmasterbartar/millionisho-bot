@@ -10,24 +10,31 @@ from openai import OpenAI
 from cachetools import TTLCache
 import aiohttp
 import signal
+from config import (
+    TELEGRAM_TOKEN,
+    OPENAI_API_KEY,
+    WORDPRESS_BASE_URL,
+    PROXY_URL,
+    CACHE_TTL,
+    CACHE_MAX_SIZE
+)
 
 # Configure logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=logging.INFO,
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('bot.log')
+    ]
 )
 logger = logging.getLogger(__name__)
-
-# Environment Variables
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', '7631560101:AAEezcBRD_JXH5l5KNoBggflvqcVs4YPYbk')
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
-WORDPRESS_BASE_URL = os.getenv('WORDPRESS_BASE_URL', 'https://mirallino.ir')
 
 # States for conversation handler
 MAIN_MENU, LICENSE_INPUT, CHAT_STATE = range(3)
 
-# Cache for storing user license status (TTL: 1 hour)
-license_cache = TTLCache(maxsize=1000, ttl=3600)
+# Cache for storing user license status
+license_cache = TTLCache(maxsize=CACHE_MAX_SIZE, ttl=CACHE_TTL)
 
 # Initialize OpenAI client
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -49,7 +56,8 @@ async def verify_license(license_key: str) -> bool:
     
     logger.info(f"Verifying license at URL: {url}")
     try:
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=10)  # 10 seconds timeout
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(url, json=data, headers=headers) as response:
                 logger.info(f"License verification response status: {response.status}")
                 response_text = await response.text()
@@ -67,6 +75,9 @@ async def verify_license(license_key: str) -> bool:
                 else:
                     logger.error(f"Error response from WordPress: {response.status}")
                     return False
+    except asyncio.TimeoutError:
+        logger.error("License verification timeout")
+        return False
     except Exception as e:
         logger.error(f"Error verifying license: {str(e)}")
         return False
@@ -99,50 +110,86 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("لطفاً سوال خود را بپرسید:")
             context.user_data['state'] = CHAT_STATE
         else:
-            await query.message.reply_text("برای استفاده از این بخش نیاز به لایسنس معتبر دارید.")
+            await query.message.reply_text(
+                "برای استفاده از این بخش نیاز به لایسنس معتبر دارید.\n"
+                "از دکمه «وارد کردن لایسنس 🔑» استفاده کنید."
+            )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle regular messages."""
     if 'state' not in context.user_data:
-        await update.message.reply_text("لطفاً از دستور /start استفاده کنید.")
+        await start(update, context)
         return
 
     if context.user_data['state'] == LICENSE_INPUT:
-        license_key = update.message.text
+        license_key = update.message.text.strip()
+        if not license_key:
+            await update.message.reply_text("لطفاً یک کد لایسنس معتبر وارد کنید.")
+            return
+            
         logger.info(f"Received license key: {license_key}")
         is_valid = await verify_license(license_key)
         if is_valid:
             user_id = str(update.message.from_user.id)
             license_cache[user_id] = True
-            await update.message.reply_text("لایسنس شما با موفقیت تایید شد! ✅")
+            await update.message.reply_text(
+                "لایسنس شما با موفقیت تایید شد! ✅\n"
+                "حالا می‌توانید از بخش «صحبت با هوش مصنوعی 🤖» استفاده کنید."
+            )
+            await start(update, context)
             context.user_data['state'] = None
         else:
-            await update.message.reply_text("لایسنس نامعتبر است. لطفاً مطمئن شوید که کد را درست وارد کرده‌اید و دوباره تلاش کنید.")
+            await update.message.reply_text(
+                "لایسنس نامعتبر است. لطفاً مطمئن شوید که کد را درست وارد کرده‌اید و دوباره تلاش کنید."
+            )
     elif context.user_data['state'] == CHAT_STATE:
+        user_id = str(update.message.from_user.id)
+        if user_id not in license_cache or not license_cache[user_id]:
+            await update.message.reply_text("لایسنس شما منقضی شده است. لطفاً دوباره لایسنس خود را وارد کنید.")
+            context.user_data['state'] = None
+            await start(update, context)
+            return
+            
         try:
+            await update.message.reply_text("در حال پردازش درخواست شما...")
             response = client.chat.completions.create(
                 model="gpt-4",
-                messages=[{"role": "user", "content": update.message.text}]
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant. Please respond in Persian (Farsi) language."},
+                    {"role": "user", "content": update.message.text}
+                ],
+                temperature=0.7,
+                max_tokens=2000
             )
             await update.message.reply_text(response.choices[0].message.content)
         except Exception as e:
             logger.error(f"Error in GPT response: {e}")
-            await update.message.reply_text("متأسفانه در پردازش درخواست شما مشکلی پیش آمد. لطفاً دوباره تلاش کنید.")
+            await update.message.reply_text(
+                "متأسفانه در پردازش درخواست شما مشکلی پیش آمد.\n"
+                "لطفاً چند لحظه دیگر دوباره تلاش کنید."
+            )
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle errors in the telegram bot."""
     logger.error(f"Exception while handling an update: {context.error}")
+    try:
+        if update and update.effective_message:
+            await update.effective_message.reply_text(
+                "متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید."
+            )
+    except Exception as e:
+        logger.error(f"Error in error handler: {e}")
 
 async def shutdown():
     """Cleanup and shutdown the bot gracefully."""
     global application, is_running
     
     if application and is_running:
-        logger.info("Starting graceful shutdown...")
+        logger.info("Stopping bot...")
         is_running = False
         try:
-            await application.stop()
-            await application.shutdown()
+            if application.running:
+                await application.stop()
             logger.info("Bot stopped successfully")
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
@@ -150,15 +197,19 @@ async def shutdown():
 def signal_handler(signum, frame):
     """Handle system signals for graceful shutdown."""
     logger.info(f"Received signal {signum}")
-    asyncio.create_task(shutdown())
+    if asyncio.get_event_loop().is_running():
+        asyncio.create_task(shutdown())
 
 async def main() -> None:
     """Start the bot."""
     global application, is_running
     
     try:
-        # Build the application
-        application = Application.builder().token(TELEGRAM_TOKEN).build()
+        # Build the application with proxy if configured
+        builder = Application.builder().token(TELEGRAM_TOKEN)
+        if PROXY_URL:
+            builder.proxy_url(PROXY_URL)
+        application = builder.build()
 
         # Add handlers
         application.add_handler(CommandHandler("start", start))
@@ -172,15 +223,18 @@ async def main() -> None:
 
         # Start the bot
         logger.info("Starting bot...")
-        await application.initialize()
-        await application.start()
         is_running = True
         
         # Run the bot until a stop signal is received
-        await application.run_polling(drop_pending_updates=True)
+        await application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True,
+            close_loop=False
+        )
 
     except Exception as e:
         logger.error(f"Error running bot: {e}")
+    finally:
         await shutdown()
 
 if __name__ == '__main__':

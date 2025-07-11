@@ -4,7 +4,6 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
 build/
 develop-eggs/
 dist/
@@ -23,6 +22,7 @@ wheels/
 
 # Virtual Environment
 venv/
+env/
 ENV/
 
 # IDE
@@ -31,12 +31,20 @@ ENV/
 *.swp
 *.swo
 
-# Config
-config.py
-.env
-
 # Logs
 *.log
+logs/
+log/
 
-# ZIP files
-*.zip 
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Local development
+*.db
+*.sqlite3
+
+# Operating System
+.DS_Store
+Thumbs.db 
