@@ -4,10 +4,6 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from telegram.constants import ParseMode
-from config import (
-    TELEGRAM_TOKEN, OPENAI_API_KEY, WORDPRESS_BASE_URL,
-    PROXY_HOST, PROXY_PORT, PROXY_USERNAME, PROXY_PASSWORD
-)
 from openai import OpenAI
 from cachetools import TTLCache
 import aiohttp
@@ -19,6 +15,15 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+# Environment Variables
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', '7631560101:AAEezcBRD_JXH5l5KNoBggflvqcVs4YPYbk')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
+WORDPRESS_BASE_URL = os.getenv('WORDPRESS_BASE_URL', 'https://mirallino.ir')
+PROXY_HOST = os.getenv('PROXY_HOST', 'm3.bernoclub.top')
+PROXY_PORT = int(os.getenv('PROXY_PORT', '18979'))
+PROXY_USERNAME = os.getenv('PROXY_USERNAME', 'bec3a75d-9030-4ca4-9ffc-ef8d76f46f94')
+PROXY_PASSWORD = os.getenv('PROXY_PASSWORD', '')
 
 # States for conversation handler
 MAIN_MENU, LICENSE_INPUT, CHAT_STATE = range(3)
