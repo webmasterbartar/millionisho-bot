@@ -39,58 +39,33 @@ user_current_post = {}
 
 # Instagram-style system prompts
 SYSTEM_PROMPTS = [
-    """You are a professional social media content expert specializing in viral Instagram hooks and captions in Persian (Farsi). Create ONE engaging hook about {topic} using one of these formats randomly:
+    """You are a professional social media content expert specializing in viral Instagram hooks in Persian (Farsi). Create ONE engaging hook about {topic} using one of these formats:
 
-    Hook Templates (choose ONE randomly):
-    1. "درباره {topic} هیچکس بهت نمیگه..."
-    2. "هرچی درباره {topic} می‌دونی بذار پشت در بیا تو!"
-    3. "۵ اشتباه رایج {topic} که باید بدونی"
-    4. "با این کارا توی {topic} از همه جلو بزن"
-    5. "اگه میخوای {topic} رو یاد بگیری باید..."
-    6. "باورم نمیشه اینو دارم رایگان درباره {topic} بهتون میگم"
-    7. "کاش اوایل کارم درباره {topic} می‌دونستم که..."
-    8. "میدونی چرا روی این پست {topic} وایسادی؟"
-    9. "با این روش، توی {topic} همه رو پشت سر بذار"
-    10. "برای تو هم توی {topic} اتفاق افتاده که..."
-    11. "یه راز مهم درباره {topic} میخوام بهت بگم..."
-    12. "عمراً کسی بهت بگه که {topic} اینجوریه"
-    13. "عمراً این ترفند {topic} رو بلد باشی"
-    14. "مطمئنم این نکته {topic} قراره زندگیت رو عوض کنه"
-    15. "اینو توی {topic} اشتباه انجام میدی"
-    16. "یه ویژگی جدید توی {topic} که فقط حرفه‌ای‌ها میدونن"
-    17. "اگه {topic} رو بلد نیستی حتما تا آخر ببین"
-    18. "تخفیف باورنکردنی برای یادگیری {topic}"
-    19. "۵ حرکت ایده‌آل برای موفقیت در {topic}"
-    20. "ترفندهایی که باید برای {topic} بدونی"
-    21. "۳ ترفند خلاقانه برای {topic}"
-    22. "اینو اصلاً درباره {topic} نمی‌دونی"
-    23. "اگه می‌خوای توی {topic} موفق بشی، با من همراه باش"
-    24. "اگه می‌خوای توی یک هفته {topic} رو یاد بگیری، با من همراه باش"
-    25. "اگه می‌خوای خیلی سریع {topic} رو یاد بگیری..."
-    26. "آدم با جنبه‌ای هستی؟ یه ایده ناب برای {topic} دارم"
-    27. "می‌خوام یه روش انقلابی برای {topic} بهت بگم"
-    28. "این کار {topic} رو همین الان باید انجام بدی"
-    29. "این سه تا اشتباه رو توی {topic} تکرار نکن"
-    30. "رازهای {topic} که هیچکس بهت نمیگه"
+    Hook Templates:
+    1. "۵ اشتباه رایج در {topic} که کسب و کارت رو نابود میکنه 😱"
+    2. "۳ اشتباه مرگبار {topic} که باید همین الان متوقف کنی ⛔"
+    3. "۷ نکته طلایی {topic} که رقبات نمیخوان بدونی 🔥"
+    4. "اشتباه بزرگ {topic} که ۹۰٪ کسب و کارها انجام میدن 💀"
+    5. "راز موفقیت در {topic} که هیچکس بهت نمیگه 🤫"
+    6. "چرا {topic} شما شکست میخوره؟ (دلیل اصلی) ⚠️"
+    7. "بهترین استراتژی {topic} که نتیجه‌ش تضمینیه 💯"
+    8. "اگه تو {topic} موفق نیستی، این پست مال توئه 👆"
+    9. "این اشتباهات {topic} داره کسب و کارت رو نابود میکنه 😨"
+    10. "قبل از شروع {topic} حتما اینو بخون ⚡"
 
     Guidelines for the hook:
     1. Make it ONE line only - short, punchy, and attention-grabbing
-    2. Use emojis strategically (2-3 max)
-    3. Focus on value and curiosity
-    4. Make it sound exclusive and urgent
+    2. Use maximum 2 emojis strategically
+    3. Focus on value and urgency
+    4. Make it specific to the topic
     5. Use natural, conversational Farsi
     6. Avoid clickbait - deliver real value
-    7. Make it specific to the topic
-    8. Use numbers when relevant (e.g., 3 tips, 5 secrets)
+    7. For business topics, focus on ROI and results
+    8. For technical topics, focus on best practices and common mistakes
+    9. For marketing topics, focus on growth and strategy
+    10. Always maintain professional tone while being engaging
 
-    After the hook, write a short (2-3 lines) engaging caption that delivers on the hook's promise. The caption should:
-    1. Provide actual value
-    2. Be actionable
-    3. Include a call-to-action
-    4. Use professional but friendly tone
-    5. Include relevant hashtags (3-5 max)
-
-    Remember: The goal is to create content that's both engaging AND valuable."""
+    Remember: The goal is to create a hook that's both professional AND attention-grabbing, while staying true to the topic's context."""
 ]
 
 async def get_wordpress_posts(page=1):
@@ -329,7 +304,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif state == "awaiting_topic":
         try:
-            await update.message.reply_text("🤔 در حال ساخت محتوای جذاب...")
+            await update.message.reply_text("🎯 در حال آماده‌سازی محتوای حرفه‌ای...")
             
             system_prompt = random.choice(SYSTEM_PROMPTS).format(topic=message_text)
             
@@ -342,22 +317,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     },
                     {
                         "role": "user",
-                        "content": f"لطفاً یک قلاب (هوک) جذاب و کپشن کوتاه برای موضوع {message_text} بنویس. قلاب باید در یک خط و خلاقانه باشه و کپشن باید ارزشمند و کاربردی باشه."
+                        "content": f"لطفاً یک هوک (قلاب) حرفه‌ای و تاثیرگذار برای موضوع {message_text} بنویس. هوک باید کاملاً مرتبط با کسب و کار و حرفه‌ای باشد."
                     }
                 ],
-                temperature=0.8,
-                max_tokens=2000
+                temperature=0.7,
+                max_tokens=150
             )
             
+            generated_hook = response.choices[0].message.content.strip()
+            
+            # Send the hook with a professional format
             await update.message.reply_text(
-                response.choices[0].message.content,
+                f"✨ هوک پیشنهادی شما:\n\n{generated_hook}",
                 reply_markup=get_main_keyboard(user_id)
             )
             
-            # Ask if they want to generate another post
-            user_states[user_id] = "awaiting_topic"
+            # Ask if they want to generate another hook
             await update.message.reply_text(
-                "🎯 می‌خواهید درباره موضوع دیگری پست بسازم؟\n"
+                "🎯 آیا می‌خواهید هوک دیگری برای موضوع جدید بسازم؟\n"
                 "موضوع جدید را وارد کنید یا به منو برگردید:",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("🏠 بازگشت به منو", callback_data="menu")
