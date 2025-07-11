@@ -7,7 +7,6 @@ from telegram.constants import ParseMode
 from openai import OpenAI
 from cachetools import TTLCache
 import aiohttp
-from aiohttp_socks import ProxyConnector
 
 # Configure logging
 logging.basicConfig(
@@ -20,10 +19,6 @@ logger = logging.getLogger(__name__)
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', '7631560101:AAEezcBRD_JXH5l5KNoBggflvqcVs4YPYbk')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
 WORDPRESS_BASE_URL = os.getenv('WORDPRESS_BASE_URL', 'https://mirallino.ir')
-PROXY_HOST = os.getenv('PROXY_HOST', 'm3.bernoclub.top')
-PROXY_PORT = int(os.getenv('PROXY_PORT', '18979'))
-PROXY_USERNAME = os.getenv('PROXY_USERNAME', 'bec3a75d-9030-4ca4-9ffc-ef8d76f46f94')
-PROXY_PASSWORD = os.getenv('PROXY_PASSWORD', '')
 
 # States for conversation handler
 MAIN_MENU, LICENSE_INPUT, CHAT_STATE = range(3)
@@ -34,22 +29,11 @@ license_cache = TTLCache(maxsize=1000, ttl=3600)
 # Initialize OpenAI client
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Proxy Configuration
-PROXY_CONFIG = {
-    'hostname': PROXY_HOST,
-    'port': PROXY_PORT,
-    'username': PROXY_USERNAME,
-    'password': PROXY_PASSWORD
-}
-
 async def verify_license(license_key: str) -> bool:
     """Verify license key with WordPress site."""
     url = f"{WORDPRESS_BASE_URL}/wp-json/millionisho/v1/verify-license"
     try:
-        connector = ProxyConnector.from_url(
-            f'socks5://{PROXY_CONFIG["username"]}:{PROXY_CONFIG["password"]}@{PROXY_CONFIG["hostname"]}:{PROXY_CONFIG["port"]}'
-        )
-        async with aiohttp.ClientSession(connector=connector) as session:
+        async with aiohttp.ClientSession() as session:
             async with session.post(url, json={'license_key': license_key}) as response:
                 if response.status == 200:
                     data = await response.json()
@@ -120,14 +104,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     """Run the bot."""
     print("Starting bot...")
-    print(f"Using SOCKS5 proxy: {PROXY_CONFIG['hostname']}:{PROXY_CONFIG['port']}")
     
-    # Initialize bot with proxy settings
+    # Initialize bot
     application = (
         Application.builder()
         .token(TELEGRAM_TOKEN)
-        .proxy_url(f"socks5://{PROXY_CONFIG['username']}:{PROXY_CONFIG['password']}@{PROXY_CONFIG['hostname']}:{PROXY_CONFIG['port']}")
-        .get_updates_proxy_url(f"socks5://{PROXY_CONFIG['username']}:{PROXY_CONFIG['password']}@{PROXY_CONFIG['hostname']}:{PROXY_CONFIG['port']}")
         .build()
     )
 
