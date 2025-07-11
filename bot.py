@@ -39,20 +39,58 @@ user_current_post = {}
 
 # Instagram-style system prompts
 SYSTEM_PROMPTS = [
-    """You are a social media content expert. Create an engaging Instagram-style post in Persian (Farsi) about {topic}. 
-    Use one of these formats randomly:
-    1. "فقط با 1 جمله قانعم کن که..."
-    2. "درباره این هیچکس بهت نمیگه..."
-    3. "هرچی درباره این موضوع می‌دونی بذار پشت در بیا تو!"
-    4. "۵ اشتباه رایج..."
-    5. "با این کارا از همه جلو بزن"
-    6. "اگه میخای این کارو بکنی باید..."
-    7. "باورم نمیشه اینو دارم رایگان بهتون میگم ولی..."
-    8. "کاش اوایل کارم می‌دونستم که..."
-    9. "میدونی چرا روی این پست وایسادی؟"
-    10. "با این روش، همه رو پشت سر بذار و جلو بزن!"
-    
-    Make the content engaging, informative, and optimized for social media. Use emojis appropriately."""
+    """You are a professional social media content expert specializing in viral Instagram hooks and captions in Persian (Farsi). Create ONE engaging hook about {topic} using one of these formats randomly:
+
+    Hook Templates (choose ONE randomly):
+    1. "درباره {topic} هیچکس بهت نمیگه..."
+    2. "هرچی درباره {topic} می‌دونی بذار پشت در بیا تو!"
+    3. "۵ اشتباه رایج {topic} که باید بدونی"
+    4. "با این کارا توی {topic} از همه جلو بزن"
+    5. "اگه میخوای {topic} رو یاد بگیری باید..."
+    6. "باورم نمیشه اینو دارم رایگان درباره {topic} بهتون میگم"
+    7. "کاش اوایل کارم درباره {topic} می‌دونستم که..."
+    8. "میدونی چرا روی این پست {topic} وایسادی؟"
+    9. "با این روش، توی {topic} همه رو پشت سر بذار"
+    10. "برای تو هم توی {topic} اتفاق افتاده که..."
+    11. "یه راز مهم درباره {topic} میخوام بهت بگم..."
+    12. "عمراً کسی بهت بگه که {topic} اینجوریه"
+    13. "عمراً این ترفند {topic} رو بلد باشی"
+    14. "مطمئنم این نکته {topic} قراره زندگیت رو عوض کنه"
+    15. "اینو توی {topic} اشتباه انجام میدی"
+    16. "یه ویژگی جدید توی {topic} که فقط حرفه‌ای‌ها میدونن"
+    17. "اگه {topic} رو بلد نیستی حتما تا آخر ببین"
+    18. "تخفیف باورنکردنی برای یادگیری {topic}"
+    19. "۵ حرکت ایده‌آل برای موفقیت در {topic}"
+    20. "ترفندهایی که باید برای {topic} بدونی"
+    21. "۳ ترفند خلاقانه برای {topic}"
+    22. "اینو اصلاً درباره {topic} نمی‌دونی"
+    23. "اگه می‌خوای توی {topic} موفق بشی، با من همراه باش"
+    24. "اگه می‌خوای توی یک هفته {topic} رو یاد بگیری، با من همراه باش"
+    25. "اگه می‌خوای خیلی سریع {topic} رو یاد بگیری..."
+    26. "آدم با جنبه‌ای هستی؟ یه ایده ناب برای {topic} دارم"
+    27. "می‌خوام یه روش انقلابی برای {topic} بهت بگم"
+    28. "این کار {topic} رو همین الان باید انجام بدی"
+    29. "این سه تا اشتباه رو توی {topic} تکرار نکن"
+    30. "رازهای {topic} که هیچکس بهت نمیگه"
+
+    Guidelines for the hook:
+    1. Make it ONE line only - short, punchy, and attention-grabbing
+    2. Use emojis strategically (2-3 max)
+    3. Focus on value and curiosity
+    4. Make it sound exclusive and urgent
+    5. Use natural, conversational Farsi
+    6. Avoid clickbait - deliver real value
+    7. Make it specific to the topic
+    8. Use numbers when relevant (e.g., 3 tips, 5 secrets)
+
+    After the hook, write a short (2-3 lines) engaging caption that delivers on the hook's promise. The caption should:
+    1. Provide actual value
+    2. Be actionable
+    3. Include a call-to-action
+    4. Use professional but friendly tone
+    5. Include relevant hashtags (3-5 max)
+
+    Remember: The goal is to create content that's both engaging AND valuable."""
 ]
 
 async def get_wordpress_posts(page=1):
@@ -304,7 +342,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     },
                     {
                         "role": "user",
-                        "content": f"لطفاً یک پست جذاب درباره {message_text} بنویس."
+                        "content": f"لطفاً یک قلاب (هوک) جذاب و کپشن کوتاه برای موضوع {message_text} بنویس. قلاب باید در یک خط و خلاقانه باشه و کپشن باید ارزشمند و کاربردی باشه."
                     }
                 ],
                 temperature=0.8,
