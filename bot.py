@@ -37,7 +37,7 @@ user_licenses = {}
 
 async def verify_license(license_key: str) -> bool:
     """Verify license key with WordPress site."""
-    url = f"{WORDPRESS_BASE_URL}/wp-json/millionisho/v1/verify-license"
+    url = f"{WORDPRESS_BASE_URL}/wp-json/licensing/v1/verify"
     
     try:
         # Configure session
@@ -47,19 +47,18 @@ async def verify_license(license_key: str) -> bool:
         async with aiohttp.ClientSession(connector=conn, timeout=timeout) as session:
             # Prepare request
             headers = {
-                'Content-Type': 'application/json',
                 'Accept': 'application/json',
                 'User-Agent': 'Millionisho-Bot/1.0'
             }
             
-            data = {'license_key': license_key}
+            params = {'key': license_key}
             
             # Log request details
             logger.info(f"Sending license verification request to: {url}")
-            logger.info(f"Request data: {data}")
+            logger.info(f"Request params: {params}")
             
             # Make request
-            async with session.post(url, json=data, headers=headers) as response:
+            async with session.get(url, params=params, headers=headers) as response:
                 # Log response
                 logger.info(f"Response status: {response.status}")
                 text = await response.text()
@@ -68,7 +67,7 @@ async def verify_license(license_key: str) -> bool:
                 if response.status == 200:
                     try:
                         data = json.loads(text)
-                        return data.get('valid', False)
+                        return data.get('status') == 'valid'
                     except json.JSONDecodeError:
                         logger.error("Failed to parse JSON response")
                         return False
