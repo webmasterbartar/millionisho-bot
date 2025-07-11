@@ -37,7 +37,7 @@ user_licenses = {}
 
 async def verify_license(license_key: str) -> bool:
     """Verify license key with WordPress site."""
-    url = f"{WORDPRESS_BASE_URL}/wp-json/millionisho/v1/verify-license"
+    url = f"{WORDPRESS_BASE_URL}/wp-json/wp/v2/millionisho/verify-license"  # Updated API path
     data = {'license_key': license_key}
     
     logger.info(f"Verifying license key: {license_key}")
@@ -52,13 +52,17 @@ async def verify_license(license_key: str) -> bool:
                 session._connector._proxy = PROXY_URL
                 logger.info(f"Using proxy: {PROXY_URL}")
             
+            headers = {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'User-Agent': 'Millionisho-Bot/1.0',
+                'Authorization': f'Bearer {license_key}'  # Added authorization
+            }
+            
             async with session.post(
                 url,
                 json=data,
-                headers={
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                }
+                headers=headers
             ) as response:
                 logger.info(f"Response status: {response.status}")
                 response_text = await response.text()
