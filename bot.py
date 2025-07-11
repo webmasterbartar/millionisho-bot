@@ -16,6 +16,7 @@ from config import (
     OPENAI_API_KEY,
     WORDPRESS_BASE_URL
 )
+import asyncio
 
 # Configure logging
 logging.basicConfig(
@@ -36,21 +37,47 @@ user_licenses = {}
 async def verify_license(license_key: str) -> bool:
     """Verify license key with WordPress site."""
     url = f"{WORDPRESS_BASE_URL}/wp-json/millionisho/v1/verify-license"
+    data = {'license_key': license_key}
+    
+    logger.info(f"Verifying license key: {license_key}")
+    logger.info(f"Sending request to: {url}")
+    logger.info(f"Request data: {data}")
     
     try:
         timeout = aiohttp.ClientTimeout(total=10)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(
                 url,
-                json={'license_key': license_key},
-                headers={'Content-Type': 'application/json'}
+                json=data,
+                headers={
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                }
             ) as response:
+                logger.info(f"Response status: {response.status}")
+                response_text = await response.text()
+                logger.info(f"Response body: {response_text}")
+                
                 if response.status == 200:
-                    data = await response.json()
-                    return data.get('valid', False)
-                return False
+                    try:
+                        response_data = json.loads(response_text)
+                        is_valid = response_data.get('valid', False)
+                        logger.info(f"License is valid: {is_valid}")
+                        return is_valid
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Failed to parse JSON response: {e}")
+                        logger.error(f"Raw response: {response_text}")
+                        return False
+                else:
+                    logger.error(f"Server returned non-200 status: {response.status}")
+                    logger.error(f"Response body: {response_text}")
+                    return False
+    except asyncio.TimeoutError:
+        logger.error("Request timed out after 10 seconds")
+        return False
     except Exception as e:
-        logger.error(f"License verification error: {e}")
+        logger.error(f"Error during license verification: {str(e)}")
+        logger.exception("Full traceback:")
         return False
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
