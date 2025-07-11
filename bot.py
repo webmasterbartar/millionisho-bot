@@ -255,8 +255,17 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await query.answer()
     
+    if query.data == "license":
+        user_states[user_id] = "awaiting_license"
+        await query.message.edit_text(
+            "لطفاً کد لایسنس خود را وارد کنید:",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🏠 بازگشت به منو", callback_data="menu")
+            ]])
+        )
+    
     # Add these new conditions for hook navigation
-    if query.data in ["prev_hook", "next_hook"]:
+    elif query.data in ["prev_hook", "next_hook"]:
         if user_id not in user_states or user_states[user_id] != "viewing_hooks":
             await query.message.edit_text(
                 "لطفاً ابتدا موضوع خود را وارد کنید:",
@@ -359,8 +368,44 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     state = user_states[user_id]
     
+    if state == "awaiting_license":
+        if not message_text:
+            await update.message.reply_text(
+                "لطفاً یک کد لایسنس معتبر وارد کنید.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🏠 بازگشت به منو", callback_data="menu")
+                ]])
+            )
+            return
+            
+        is_valid = await verify_license(message_text)
+        
+        if is_valid:
+            user_licenses[user_id] = True
+            user_states[user_id] = None
+            await update.message.reply_text(
+                "✅ لایسنس شما با موفقیت تأیید شد!\n"
+                "حالا می‌توانید از امکانات ربات استفاده کنید.",
+                reply_markup=get_main_keyboard(user_id)
+            )
+        else:
+            await update.message.reply_text(
+                "❌ لایسنس نامعتبر است.\n"
+                "لطفاً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🏠 بازگشت به منو", callback_data="menu")
+                ]])
+            )
+    
     # Add new state handler for template-based hooks
-    if state == "awaiting_topic_template":
+    elif state == "awaiting_topic_template":
+        if user_id not in user_licenses or not user_licenses[user_id]:
+            await update.message.reply_text(
+                "برای استفاده از این بخش نیاز به لایسنس معتبر دارید.",
+                reply_markup=get_main_keyboard(user_id)
+            )
+            return
+            
         context.user_data["current_topic"] = message_text
         user_states[user_id] = "viewing_hooks"
         hook = get_random_hook(user_id, message_text)
@@ -370,6 +415,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     
     elif state == "awaiting_topic_ai":
+        if user_id not in user_licenses or not user_licenses[user_id]:
+            await update.message.reply_text(
+                "برای استفاده از این بخش نیاز به لایسنس معتبر دارید.",
+                reply_markup=get_main_keyboard(user_id)
+            )
+            return
+            
         # Use the existing AI-based generation
         try:
             await update.message.reply_text("🎯 در حال آماده‌سازی محتوای حرفه‌ای...")
