@@ -68,6 +68,44 @@ SYSTEM_PROMPTS = [
     Remember: The goal is to create a hook that's both professional AND attention-grabbing, while staying true to the topic's context."""
 ]
 
+# Hook templates for direct use
+HOOK_TEMPLATES = [
+    "درباره {topic} هیچکس بهت نمیگه...",
+    "هرچی درباره {topic} می‌دونی بذار پشت در بیا تو!",
+    "۵ اشتباه رایج {topic}",
+    "با این کارا از همه جلو بزن",
+    "اگه میخای {topic} رو انجام بدی باید...",
+    "باورم نمیشه اینو دارم رایگان بهتون میگم ولی {topic}...",
+    "کاش اوایل کارم می‌دونستم که {topic} بهترین کار اینه که با روش {topic} پیش برم",
+    "میدونی چرا روی این پست وایسادی؟",
+    "با این روش، همه رو پشت سر بذار و جلو بزن!",
+    "برای تو هم اتفاق افتاده که {topic}...",
+    "می‌خوام یه رازی رو بهتون بگم {topic}...",
+    "عمراً کسی بهت بگه که {topic}...",
+    "عمراً این ترفند رو بلد باشی {topic}...",
+    "مطمئنم این قرار زندگی تو عوض کنه {topic}...",
+    "اینو اشتباه انجام میدی",
+    "ویژگی جدیدی که تعداد کمی از مردم می‌دونند",
+    "اگه بلد نیستی {topic} حتما تا آخر ببین",
+    "تخفیف باورنکردنی",
+    "۵ حرکت ایده آل",
+    "ترفندهایی که باید بدونی تا {topic}...",
+    "۳ ترفند خلاقانه برای {topic}...",
+    "اینو اصلاً نمی‌دونی که {topic}...",
+    "اگه می‌خوای {topic} این ریلز رو ببین",
+    "اگه می‌خوای فقط تو یک هفته {topic} این ریلز رو ببین",
+    "اگه می‌خوای خیلی سریع {topic}...",
+    "آدم با جنبه هستی؟ می‌خوام یه ایده بهت بدم {topic}...",
+    "می‌خوام بهت روشی رو بگم {topic}...",
+    "این کارو همین الان باید انجامش بدی"
+]
+
+# Store used templates for each user
+user_used_templates = {}
+
+# Add after the user_current_post dictionary
+user_current_template = {}
+
 async def get_wordpress_posts(page=1):
     """Get posts from WordPress site."""
     url = f"{WORDPRESS_BASE_URL}/wp-json/wp/v2/posts"
@@ -143,6 +181,18 @@ def get_main_keyboard(user_id: str):
     
     return InlineKeyboardMarkup(keyboard)
 
+# Add after the get_main_keyboard function
+def get_hook_keyboard(user_id: str):
+    """Get keyboard with navigation buttons for hooks."""
+    keyboard = [
+        [
+            InlineKeyboardButton("⬅️ قلاب قبلی", callback_data="prev_hook"),
+            InlineKeyboardButton("قلاب بعدی ➡️", callback_data="next_hook")
+        ],
+        [InlineKeyboardButton("🏠 بازگشت به منو", callback_data="menu")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
 async def show_post(update: Update, context: ContextTypes.DEFAULT_TYPE, page=1):
     """Show WordPress post with navigation buttons."""
     post, total_pages = await get_wordpress_posts(page)
@@ -205,32 +255,68 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await query.answer()
     
-    if query.data == "license":
-        user_states[user_id] = "awaiting_license"
+    # Add these new conditions for hook navigation
+    if query.data in ["prev_hook", "next_hook"]:
+        if user_id not in user_states or user_states[user_id] != "viewing_hooks":
+            await query.message.edit_text(
+                "لطفاً ابتدا موضوع خود را وارد کنید:",
+                reply_markup=get_main_keyboard(user_id)
+            )
+            return
+            
+        topic = context.user_data.get("current_topic", "")
+        if not topic:
+            await query.message.edit_text(
+                "لطفاً ابتدا موضوع خود را وارد کنید:",
+                reply_markup=get_main_keyboard(user_id)
+            )
+            return
+            
+        hook = get_random_hook(user_id, topic)
         await query.message.edit_text(
-            "لطفاً کد لایسنس خود را وارد کنید:",
+            f"✨ قلاب پیشنهادی:\n\n{hook}",
+            reply_markup=get_hook_keyboard(user_id)
+        )
+        return
+
+    # Modify the chat handler to include hook templates
+    elif query.data == "chat":
+        if user_id in user_licenses and user_licenses[user_id]:
+            user_states[user_id] = "awaiting_topic"
+            await query.message.edit_text(
+                "🎯 لطفاً موضوع مورد نظر خود را وارد کنید:\n\n"
+                "مثال: دیجیتال مارکتینگ، کسب درآمد از اینستاگرام، افزایش فروش و...\n\n"
+                "✨ می‌توانید از قالب‌های آماده استفاده کنید یا محتوای هوشمند تولید کنید.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📝 استفاده از قالب‌های آماده", callback_data="use_templates")],
+                    [InlineKeyboardButton("🤖 تولید محتوای هوشمند", callback_data="use_ai")],
+                    [InlineKeyboardButton("🏠 بازگشت به منو", callback_data="menu")]
+                ])
+            )
+        else:
+            await query.message.edit_text(
+                "برای استفاده از این بخش نیاز به لایسنس معتبر دارید.",
+                reply_markup=get_main_keyboard(user_id)
+            )
+    
+    elif query.data == "use_templates":
+        user_states[user_id] = "awaiting_topic_template"
+        await query.message.edit_text(
+            "🎯 لطفاً موضوع خود را وارد کنید تا قالب‌های آماده را نمایش دهم:",
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("🏠 بازگشت به منو", callback_data="menu")
             ]])
         )
     
-    elif query.data == "chat":
-        if user_id in user_licenses and user_licenses[user_id]:
-            user_states[user_id] = "awaiting_topic"
-            await query.message.edit_text(
-                "🎯 لطفاً موضوع پست خود را وارد کنید:\n\n"
-                "مثال: دیجیتال مارکتینگ، کسب درآمد از اینستاگرام، افزایش فروش و...",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🏠 بازگشت به منو", callback_data="menu")
-                ]])
-            )
-        else:
-            await query.message.edit_text(
-                "برای استفاده از این بخش نیاز به لایسنس معتبر دارید.\n"
-                "لطفاً ابتدا لایسنس خود را وارد کنید.",
-                reply_markup=get_main_keyboard(user_id)
-            )
-    
+    elif query.data == "use_ai":
+        user_states[user_id] = "awaiting_topic_ai"
+        await query.message.edit_text(
+            "🎯 لطفاً موضوع خود را وارد کنید تا محتوای هوشمند تولید کنم:",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🏠 بازگشت به منو", callback_data="menu")
+            ]])
+        )
+
     elif query.data == "posts":
         await show_post(update, context, 1)
     
@@ -273,36 +359,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     state = user_states[user_id]
     
-    if state == "awaiting_license":
-        if not message_text:
-            await update.message.reply_text(
-                "لطفاً یک کد لایسنس معتبر وارد کنید.",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🏠 بازگشت به منو", callback_data="menu")
-                ]])
-            )
-            return
-            
-        is_valid = await verify_license(message_text)
-        
-        if is_valid:
-            user_licenses[user_id] = True
-            user_states[user_id] = None
-            await update.message.reply_text(
-                "✅ لایسنس شما با موفقیت تأیید شد!\n"
-                "حالا می‌توانید از امکانات ربات استفاده کنید.",
-                reply_markup=get_main_keyboard(user_id)
-            )
-        else:
-            await update.message.reply_text(
-                "❌ لایسنس نامعتبر است.\n"
-                "لطفاً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید.",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🏠 بازگشت به منو", callback_data="menu")
-                ]])
-            )
+    # Add new state handler for template-based hooks
+    if state == "awaiting_topic_template":
+        context.user_data["current_topic"] = message_text
+        user_states[user_id] = "viewing_hooks"
+        hook = get_random_hook(user_id, message_text)
+        await update.message.reply_text(
+            f"✨ قلاب پیشنهادی:\n\n{hook}",
+            reply_markup=get_hook_keyboard(user_id)
+        )
     
-    elif state == "awaiting_topic":
+    elif state == "awaiting_topic_ai":
+        # Use the existing AI-based generation
         try:
             await update.message.reply_text("🎯 در حال آماده‌سازی محتوای حرفه‌ای...")
             
@@ -326,19 +394,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             generated_hook = response.choices[0].message.content.strip()
             
-            # Send the hook with a professional format
             await update.message.reply_text(
                 f"✨ هوک پیشنهادی شما:\n\n{generated_hook}",
                 reply_markup=get_main_keyboard(user_id)
-            )
-            
-            # Ask if they want to generate another hook
-            await update.message.reply_text(
-                "🎯 آیا می‌خواهید هوک دیگری برای موضوع جدید بسازم؟\n"
-                "موضوع جدید را وارد کنید یا به منو برگردید:",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🏠 بازگشت به منو", callback_data="menu")
-                ]])
             )
             
         except Exception as e:
