@@ -34,7 +34,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 
 # Global variables
 application = None
-should_stop = False
+is_running = False
 
 async def verify_license(license_key: str) -> bool:
     """Verify license key with WordPress site."""
@@ -133,19 +133,28 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     """Handle errors in the telegram bot."""
     logger.error(f"Exception while handling an update: {context.error}")
 
-def stop_bot(signum, frame):
-    """Signal handler to stop the bot."""
-    global should_stop
-    logger.info("Received stop signal")
-    should_stop = True
+async def shutdown():
+    """Cleanup and shutdown the bot gracefully."""
+    global application, is_running
+    
+    if application and is_running:
+        logger.info("Starting graceful shutdown...")
+        is_running = False
+        try:
+            await application.stop()
+            await application.shutdown()
+            logger.info("Bot stopped successfully")
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
+
+def signal_handler(signum, frame):
+    """Handle system signals for graceful shutdown."""
+    logger.info(f"Received signal {signum}")
+    asyncio.create_task(shutdown())
 
 async def main() -> None:
     """Start the bot."""
-    global application
-    
-    # Set up signal handlers
-    signal.signal(signal.SIGINT, stop_bot)
-    signal.signal(signal.SIGTERM, stop_bot)
+    global application, is_running
     
     try:
         # Build the application
@@ -157,21 +166,22 @@ async def main() -> None:
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         application.add_error_handler(error_handler)
 
+        # Set up signal handlers
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+
         # Start the bot
         logger.info("Starting bot...")
         await application.initialize()
         await application.start()
+        is_running = True
+        
+        # Run the bot until a stop signal is received
         await application.run_polling(drop_pending_updates=True)
 
     except Exception as e:
         logger.error(f"Error running bot: {e}")
-    finally:
-        # Proper cleanup
-        if application:
-            logger.info("Stopping bot...")
-            await application.stop()
-            await application.shutdown()
-            logger.info("Bot stopped successfully")
+        await shutdown()
 
 if __name__ == '__main__':
     try:
@@ -180,4 +190,3 @@ if __name__ == '__main__':
         logger.info("Bot stopped by user")
     except Exception as e:
         logger.error(f"Bot stopped due to error: {e}")
-        raise
