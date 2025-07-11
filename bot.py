@@ -34,7 +34,7 @@ license_cache = TTLCache(maxsize=1000, ttl=3600)
 # Initialize OpenAI client
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Proxy Configuration from environment
+# Proxy Configuration
 PROXY_CONFIG = {
     'hostname': PROXY_HOST,
     'port': PROXY_PORT,
