@@ -46,23 +46,28 @@ async def verify_license(license_key: str) -> bool:
     
     try:
         timeout = aiohttp.ClientTimeout(total=10)
-        connector = aiohttp.TCPConnector(ssl=False)
-        async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
-            if PROXY_URL:
-                session._connector._proxy = PROXY_URL
-                logger.info(f"Using proxy: {PROXY_URL}")
-            
+        
+        # Configure proxy
+        if PROXY_URL:
+            proxy = PROXY_URL
+            logger.info(f"Using proxy for API request: {proxy}")
+        else:
+            proxy = None
+        
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             headers = {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json',
                 'User-Agent': 'Millionisho-Bot/1.0',
-                'Authorization': f'Bearer {license_key}'  # Added authorization
+                'Authorization': f'Bearer {license_key}'
             }
             
             async with session.post(
                 url,
                 json=data,
-                headers=headers
+                headers=headers,
+                proxy=proxy,
+                ssl=False
             ) as response:
                 logger.info(f"Response status: {response.status}")
                 response_text = await response.text()
@@ -214,9 +219,15 @@ def main():
     """Start the bot."""
     # Create application with proxy if configured
     builder = Application.builder().token(TELEGRAM_TOKEN)
+    
+    # Configure proxy for Telegram
     if PROXY_URL:
         logger.info(f"Using proxy for Telegram: {PROXY_URL}")
-        builder.proxy_url(PROXY_URL)
+        proxy_url = PROXY_URL
+        if not proxy_url.startswith(('http://', 'https://')):
+            proxy_url = f'http://{proxy_url}'
+        builder.proxy_url(proxy_url)
+        
     application = builder.build()
     
     # Add handlers
