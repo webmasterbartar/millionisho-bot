@@ -1,6 +1,8 @@
-import logging
+import os
 import json
+import logging
 import asyncio
+import aiohttp
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -10,8 +12,8 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+from telegram.constants import ParseMode
 from openai import OpenAI
-import aiohttp
 from config import (
     TELEGRAM_TOKEN,
     OPENAI_API_KEY,
@@ -29,70 +31,51 @@ logger = logging.getLogger(__name__)
 # Initialize OpenAI client
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Dictionary to store user states
+# User states and licenses
 user_states = {}
-
-# Dictionary to store user licenses
 user_licenses = {}
 
 async def verify_license(license_key: str) -> bool:
     """Verify license key with WordPress site."""
-    url = f"{WORDPRESS_BASE_URL}/wp-json/wp/v2/millionisho/verify-license"  # Updated API path
-    data = {'license_key': license_key}
-    
-    logger.info(f"Verifying license key: {license_key}")
-    logger.info(f"Sending request to: {url}")
-    logger.info(f"Request data: {data}")
+    url = f"{WORDPRESS_BASE_URL}/wp-json/millionisho/v1/verify-license"
     
     try:
-        timeout = aiohttp.ClientTimeout(total=10)
+        # Configure session
+        conn = aiohttp.TCPConnector(ssl=False)
+        timeout = aiohttp.ClientTimeout(total=30)
         
-        # Configure proxy
-        if PROXY_URL:
-            proxy = PROXY_URL
-            logger.info(f"Using proxy for API request: {proxy}")
-        else:
-            proxy = None
-        
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with aiohttp.ClientSession(connector=conn, timeout=timeout) as session:
+            # Prepare request
             headers = {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json',
-                'User-Agent': 'Millionisho-Bot/1.0',
-                'Authorization': f'Bearer {license_key}'
+                'User-Agent': 'Millionisho-Bot/1.0'
             }
             
-            async with session.post(
-                url,
-                json=data,
-                headers=headers,
-                proxy=proxy,
-                ssl=False
-            ) as response:
+            data = {'license_key': license_key}
+            
+            # Log request details
+            logger.info(f"Sending license verification request to: {url}")
+            logger.info(f"Request data: {data}")
+            
+            # Make request
+            async with session.post(url, json=data, headers=headers) as response:
+                # Log response
                 logger.info(f"Response status: {response.status}")
-                response_text = await response.text()
-                logger.info(f"Response body: {response_text}")
+                text = await response.text()
+                logger.info(f"Response body: {text}")
                 
                 if response.status == 200:
                     try:
-                        response_data = json.loads(response_text)
-                        is_valid = response_data.get('valid', False)
-                        logger.info(f"License is valid: {is_valid}")
-                        return is_valid
-                    except json.JSONDecodeError as e:
-                        logger.error(f"Failed to parse JSON response: {e}")
-                        logger.error(f"Raw response: {response_text}")
+                        data = json.loads(text)
+                        return data.get('valid', False)
+                    except json.JSONDecodeError:
+                        logger.error("Failed to parse JSON response")
                         return False
-                else:
-                    logger.error(f"Server returned non-200 status: {response.status}")
-                    logger.error(f"Response body: {response_text}")
-                    return False
-    except asyncio.TimeoutError:
-        logger.error("Request timed out after 10 seconds")
-        return False
+                return False
+                
     except Exception as e:
-        logger.error(f"Error during license verification: {str(e)}")
-        logger.exception("Full traceback:")
+        logger.error(f"License verification error: {str(e)}")
         return False
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -138,8 +121,11 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle user messages."""
+    if not update.message or not update.message.text:
+        return
+        
     user_id = str(update.effective_user.id)
-    message_text = update.message.text
+    message_text = update.message.text.strip()
     
     if user_id not in user_states:
         await start_command(update, context)
@@ -149,7 +135,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if state == "awaiting_license":
         # Handle license verification
+        if not message_text:
+            await update.message.reply_text("لطفاً یک کد لایسنس معتبر وارد کنید.")
+            return
+            
         is_valid = await verify_license(message_text)
+        
         if is_valid:
             user_licenses[user_id] = True
             user_states[user_id] = "chatting"
@@ -157,7 +148,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "✅ لایسنس شما با موفقیت تأیید شد!\n"
                 "حالا می‌توانید از بخش چت با هوش مصنوعی استفاده کنید."
             )
-            # Show main menu again
             await start_command(update, context)
         else:
             await update.message.reply_text(
@@ -174,7 +164,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_states[user_id] = "awaiting_license"
             return
         
-        # Handle chat with GPT
         try:
             await update.message.reply_text("🤔 در حال پردازش سؤال شما...")
             
@@ -217,30 +206,33 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     """Start the bot."""
-    # Create application with proxy if configured
-    builder = Application.builder().token(TELEGRAM_TOKEN)
-    
-    # Configure proxy for Telegram
-    if PROXY_URL:
-        logger.info(f"Using proxy for Telegram: {PROXY_URL}")
-        proxy_url = PROXY_URL
-        if not proxy_url.startswith(('http://', 'https://')):
-            proxy_url = f'http://{proxy_url}'
-        builder.proxy_url(proxy_url)
+    try:
+        # Configure proxy settings for the entire application
+        if PROXY_URL:
+            os.environ['HTTPS_PROXY'] = PROXY_URL
+            os.environ['HTTP_PROXY'] = PROXY_URL
+            logger.info(f"Using proxy: {PROXY_URL}")
         
-    application = builder.build()
-    
-    # Add handlers
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CallbackQueryHandler(handle_button))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    
-    # Add error handler
-    application.add_error_handler(error_handler)
-    
-    # Start the bot
-    logger.info("Starting bot...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+        # Create and configure the application
+        application = (
+            Application.builder()
+            .token(TELEGRAM_TOKEN)
+            .build()
+        )
+        
+        # Add handlers
+        application.add_handler(CommandHandler("start", start_command))
+        application.add_handler(CallbackQueryHandler(handle_button))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+        application.add_error_handler(error_handler)
+        
+        # Start the bot
+        logger.info("Starting bot...")
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
+        
+    except Exception as e:
+        logger.error(f"Failed to start bot: {e}")
+        raise
 
 if __name__ == '__main__':
     main()
