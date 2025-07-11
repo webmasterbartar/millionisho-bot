@@ -32,24 +32,22 @@ license_cache = TTLCache(maxsize=1000, ttl=3600)
 # Initialize OpenAI client
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Global session lock
-session_lock = asyncio.Lock()
-cleanup_lock = asyncio.Lock()
-is_shutting_down = False
+# Global variables
+application = None
+shutdown_event = asyncio.Event()
 
 async def cleanup_webhook():
     """Clean up webhook and session."""
-    async with cleanup_lock:
-        try:
-            async with aiohttp.ClientSession() as session:
-                url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/deleteWebhook?drop_pending_updates=true"
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        logger.info("Successfully cleaned up webhook")
-                    else:
-                        logger.error(f"Failed to clean up webhook: {response.status}")
-        except Exception as e:
-            logger.error(f"Error during webhook cleanup: {e}")
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/deleteWebhook?drop_pending_updates=true"
+            async with session.get(url) as response:
+                if response.status == 200:
+                    logger.info("Successfully cleaned up webhook")
+                else:
+                    logger.error(f"Failed to clean up webhook: {response.status}")
+    except Exception as e:
+        logger.error(f"Error during webhook cleanup: {e}")
 
 async def verify_license(license_key: str) -> bool:
     """Verify license key with WordPress site."""
@@ -144,23 +142,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Error in GPT response: {e}")
             await update.message.reply_text("متأسفانه در پردازش درخواست شما مشکلی پیش آمد. لطفاً دوباره تلاش کنید.")
 
-async def shutdown(application: Application):
+async def shutdown():
     """Cleanup and shutdown the bot gracefully."""
-    global is_shutting_down
-    is_shutting_down = True
+    global application
     
     logger.info("Starting graceful shutdown...")
-    await cleanup_webhook()
     
-    # Stop accepting new updates
-    application.stop_running()
+    if application:
+        await cleanup_webhook()
+        await application.stop()
+        await application.shutdown()
+    
     logger.info("Bot shutdown complete")
 
-def signal_handler(signum, frame):
+def signal_handler():
     """Handle system signals for graceful shutdown."""
-    logger.info(f"Received signal {signum}")
-    if not is_shutting_down:
-        asyncio.create_task(shutdown(application))
+    logger.info("Received shutdown signal")
+    shutdown_event.set()
 
 async def main():
     """Run the bot."""
@@ -172,7 +170,7 @@ async def main():
     logger.info("Starting bot...")
     logger.info(f"WordPress API URL: {WORDPRESS_BASE_URL}")
     
-    # Initialize bot with proper shutdown
+    # Initialize bot
     application = (
         Application.builder()
         .token(TELEGRAM_TOKEN)
@@ -184,14 +182,25 @@ async def main():
     application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Set up signal handlers
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    # Set up signal handlers for graceful shutdown
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, lambda s, f: signal_handler())
 
-    # Start the bot with proper cleanup
-    await application.initialize()
-    await application.start()
-    await application.run_polling(drop_pending_updates=True)
+    try:
+        # Initialize and start the application
+        await application.initialize()
+        await application.start()
+        await application.run_polling(drop_pending_updates=True)
+        
+        # Wait for shutdown signal
+        await shutdown_event.wait()
+        
+        # Perform cleanup
+        await shutdown()
+        
+    except Exception as e:
+        logger.error(f"Error in main loop: {e}")
+        await shutdown()
 
 if __name__ == '__main__':
     try:
@@ -201,4 +210,6 @@ if __name__ == '__main__':
     except Exception as e:
         logger.error(f"Bot stopped due to error: {e}")
     finally:
-        logger.info("Bot shutdown complete")
+        # Ensure event loop is properly closed
+        if not asyncio.get_event_loop().is_closed():
+            asyncio.get_event_loop().close()
