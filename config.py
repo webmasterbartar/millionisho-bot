@@ -11,4 +11,7 @@ TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', '7631560101:AAEezcBRD_JXH5l5KNoBggf
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
 
 # WordPress API Configuration
-WORDPRESS_BASE_URL = os.getenv('WORDPRESS_BASE_URL', 'https://mirallino.ir') 
+WORDPRESS_BASE_URL = os.getenv('WORDPRESS_BASE_URL', 'https://mirallino.ir')
+
+# Proxy Configuration
+PROXY_URL = os.getenv('PROXY_URL', 'http://127.0.0.1:8118') 

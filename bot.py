@@ -1,5 +1,6 @@
 import logging
 import json
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -14,9 +15,9 @@ import aiohttp
 from config import (
     TELEGRAM_TOKEN,
     OPENAI_API_KEY,
-    WORDPRESS_BASE_URL
+    WORDPRESS_BASE_URL,
+    PROXY_URL
 )
-import asyncio
 
 # Configure logging
 logging.basicConfig(
@@ -45,7 +46,12 @@ async def verify_license(license_key: str) -> bool:
     
     try:
         timeout = aiohttp.ClientTimeout(total=10)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        connector = aiohttp.TCPConnector(ssl=False)
+        async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
+            if PROXY_URL:
+                session._connector._proxy = PROXY_URL
+                logger.info(f"Using proxy: {PROXY_URL}")
+            
             async with session.post(
                 url,
                 json=data,
@@ -202,8 +208,12 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     """Start the bot."""
-    # Create application
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    # Create application with proxy if configured
+    builder = Application.builder().token(TELEGRAM_TOKEN)
+    if PROXY_URL:
+        logger.info(f"Using proxy for Telegram: {PROXY_URL}")
+        builder.proxy_url(PROXY_URL)
+    application = builder.build()
     
     # Add handlers
     application.add_handler(CommandHandler("start", start_command))
