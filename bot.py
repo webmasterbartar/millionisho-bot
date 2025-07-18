@@ -1,10 +1,8 @@
 import os
 import json
 import logging
-import asyncio
-import aiohttp
-import random
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from typing import Dict, Optional
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -14,501 +12,466 @@ from telegram.ext import (
     filters,
 )
 from telegram.constants import ParseMode
-from openai import OpenAI
+
 from config import (
     TELEGRAM_TOKEN,
-    OPENAI_API_KEY,
-    WORDPRESS_BASE_URL,
-    PROXY_URL
+    WORDPRESS_BASE_URL
 )
+from menu_config import (
+    MAIN_MENU_BUTTONS,
+    TEMPLATE_SUBMENU_BUTTONS,
+    NAVIGATION_BUTTONS,
+    MESSAGES,
+    FREE_LIMITS,
+    LOCKED_SECTIONS,
+    CONTENT_COUNTS
+)
+from user_manager import user_manager
+from content_manager import content_manager
 
 # Configure logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=logging.INFO,
+    filename='bot.log'
 )
 logger = logging.getLogger(__name__)
 
-# Initialize OpenAI client
-client = OpenAI(api_key=OPENAI_API_KEY)
-
-# User states and data
-user_states = {}
-user_licenses = {}
-user_current_post = {}
-
-# Instagram-style system prompts
-SYSTEM_PROMPTS = [
-    """You are a professional social media content expert specializing in viral Instagram hooks in Persian (Farsi). Create ONE engaging hook about {topic} using one of these formats:
-
-    Hook Templates:
-    1. "۵ اشتباه رایج در {topic} که کسب و کارت رو نابود میکنه 😱"
-    2. "۳ اشتباه مرگبار {topic} که باید همین الان متوقف کنی ⛔"
-    3. "۷ نکته طلایی {topic} که رقبات نمیخوان بدونی 🔥"
-    4. "اشتباه بزرگ {topic} که ۹۰٪ کسب و کارها انجام میدن 💀"
-    5. "راز موفقیت در {topic} که هیچکس بهت نمیگه 🤫"
-    6. "چرا {topic} شما شکست میخوره؟ (دلیل اصلی) ⚠️"
-    7. "بهترین استراتژی {topic} که نتیجه‌ش تضمینیه 💯"
-    8. "اگه تو {topic} موفق نیستی، این پست مال توئه 👆"
-    9. "این اشتباهات {topic} داره کسب و کارت رو نابود میکنه 😨"
-    10. "قبل از شروع {topic} حتما اینو بخون ⚡"
-
-    Guidelines for the hook:
-    1. Make it ONE line only - short, punchy, and attention-grabbing
-    2. Use maximum 2 emojis strategically
-    3. Focus on value and urgency
-    4. Make it specific to the topic
-    5. Use natural, conversational Farsi
-    6. Avoid clickbait - deliver real value
-    7. For business topics, focus on ROI and results
-    8. For technical topics, focus on best practices and common mistakes
-    9. For marketing topics, focus on growth and strategy
-    10. Always maintain professional tone while being engaging
-
-    Remember: The goal is to create a hook that's both professional AND attention-grabbing, while staying true to the topic's context."""
-]
-
-# Hook templates for direct use
-HOOK_TEMPLATES = [
-    "درباره {topic} هیچکس بهت نمیگه...",
-    "هرچی درباره {topic} می‌دونی بذار پشت در بیا تو!",
-    "۵ اشتباه رایج {topic}",
-    "با این کارا از همه جلو بزن",
-    "اگه میخای {topic} رو انجام بدی باید...",
-    "باورم نمیشه اینو دارم رایگان بهتون میگم ولی {topic}...",
-    "کاش اوایل کارم می‌دونستم که {topic} بهترین کار اینه که با روش {topic} پیش برم",
-    "میدونی چرا روی این پست وایسادی؟",
-    "با این روش، همه رو پشت سر بذار و جلو بزن!",
-    "برای تو هم اتفاق افتاده که {topic}...",
-    "می‌خوام یه رازی رو بهتون بگم {topic}...",
-    "عمراً کسی بهت بگه که {topic}...",
-    "عمراً این ترفند رو بلد باشی {topic}...",
-    "مطمئنم این قرار زندگی تو عوض کنه {topic}...",
-    "اینو اشتباه انجام میدی",
-    "ویژگی جدیدی که تعداد کمی از مردم می‌دونند",
-    "اگه بلد نیستی {topic} حتما تا آخر ببین",
-    "تخفیف باورنکردنی",
-    "۵ حرکت ایده آل",
-    "ترفندهایی که باید بدونی تا {topic}...",
-    "۳ ترفند خلاقانه برای {topic}...",
-    "اینو اصلاً نمی‌دونی که {topic}...",
-    "اگه می‌خوای {topic} این ریلز رو ببین",
-    "اگه می‌خوای فقط تو یک هفته {topic} این ریلز رو ببین",
-    "اگه می‌خوای خیلی سریع {topic}...",
-    "آدم با جنبه هستی؟ می‌خوام یه ایده بهت بدم {topic}...",
-    "می‌خوام بهت روشی رو بگم {topic}...",
-    "این کارو همین الان باید انجامش بدی"
-]
-
-# Store used templates for each user
-user_used_templates = {}
-
-# Add after the user_current_post dictionary
-user_current_template = {}
-
-async def get_wordpress_posts(page=1):
-    """Get posts from WordPress site."""
-    url = f"{WORDPRESS_BASE_URL}/wp-json/wp/v2/posts"
-    params = {
-        'page': page,
-        'per_page': 1,
-        '_embed': 1
-    }
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params) as response:
-                if response.status == 200:
-                    posts = await response.json()
-                    total_pages = int(response.headers.get('X-WP-TotalPages', 1))
-                    return posts[0] if posts else None, total_pages
-                return None, 0
-    except Exception as e:
-        logger.error(f"Error fetching WordPress posts: {e}")
-        return None, 0
-
-async def verify_license(license_key: str) -> bool:
-    """Verify license key with WordPress site."""
-    url = f"{WORDPRESS_BASE_URL}/wp-json/licensing/v1/verify"
-    
-    try:
-        conn = aiohttp.TCPConnector(ssl=False)
-        timeout = aiohttp.ClientTimeout(total=30)
+class MillionishoBot:
+    def __init__(self):
+        """Initialize bot with required handlers"""
+        self.application = Application.builder().token(TELEGRAM_TOKEN).build()
+        self._setup_handlers()
         
-        async with aiohttp.ClientSession(connector=conn, timeout=timeout) as session:
-            headers = {
-                'Accept': 'application/json',
-                'User-Agent': 'Millionisho-Bot/1.0'
-            }
+    def _setup_handlers(self):
+        """Setup all necessary command and callback handlers"""
+        # Command handlers
+        self.application.add_handler(CommandHandler("start", self.start_command))
+        
+        # Callback handlers for main menu
+        self.application.add_handler(CallbackQueryHandler(self.handle_template, pattern="^template$"))
+        self.application.add_handler(CallbackQueryHandler(self.handle_reels_idea, pattern="^reels_idea$"))
+        self.application.add_handler(CallbackQueryHandler(self.handle_call_to_action, pattern="^call_to_action$"))
+        self.application.add_handler(CallbackQueryHandler(self.handle_caption, pattern="^caption$"))
+        self.application.add_handler(CallbackQueryHandler(self.handle_complete_idea, pattern="^complete_idea$"))
+        self.application.add_handler(CallbackQueryHandler(self.handle_interactive_story, pattern="^interactive_story$"))
+        self.application.add_handler(CallbackQueryHandler(self.handle_bio, pattern="^bio$"))
+        self.application.add_handler(CallbackQueryHandler(self.handle_roadmap, pattern="^roadmap$"))
+        self.application.add_handler(CallbackQueryHandler(self.handle_all_files, pattern="^all_files$"))
+        self.application.add_handler(CallbackQueryHandler(self.handle_vip, pattern="^vip$"))
+        self.application.add_handler(CallbackQueryHandler(self.handle_favorites, pattern="^favorites$"))
+        
+        # Navigation handlers
+        self.application.add_handler(CallbackQueryHandler(self.handle_next, pattern="^next"))
+        self.application.add_handler(CallbackQueryHandler(self.handle_back, pattern="^back"))
+        self.application.add_handler(CallbackQueryHandler(self.handle_main_menu, pattern="^main_menu$"))
+        
+        # Template submenu handlers
+        self.application.add_handler(CallbackQueryHandler(self.handle_text_template, pattern="^text_template$"))
+        self.application.add_handler(CallbackQueryHandler(self.handle_image_template, pattern="^image_template$"))
+        self.application.add_handler(CallbackQueryHandler(self.handle_tutorial, pattern="^tutorial"))
+        
+        # VIP handlers
+        self.application.add_handler(CallbackQueryHandler(self.handle_activation_code, pattern="^activate_code$"))
+        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_activation_input))
+        
+        # Error handler
+        self.application.add_error_handler(self.error_handler)
+    
+    def run(self):
+        """Run the bot"""
+        self.application.run_polling()
+
+    def get_main_menu_keyboard(self) -> InlineKeyboardMarkup:
+        """Create main menu keyboard"""
+        keyboard = []
+        buttons = list(MAIN_MENU_BUTTONS.items())
+        
+        # Create rows of 2 buttons each
+        for i in range(0, len(buttons), 2):
+            row = []
+            for key, text in buttons[i:i+2]:
+                row.append(InlineKeyboardButton(text, callback_data=key))
+            keyboard.append(row)
+    
+        return InlineKeyboardMarkup(keyboard)
+
+    def get_template_submenu_keyboard(self) -> InlineKeyboardMarkup:
+        """Create template submenu keyboard"""
+        keyboard = []
+        for key, text in TEMPLATE_SUBMENU_BUTTONS.items():
+            keyboard.append([InlineKeyboardButton(text, callback_data=key)])
+        return InlineKeyboardMarkup(keyboard)
+
+    def get_navigation_keyboard(self, show_tutorial: bool = True) -> InlineKeyboardMarkup:
+        """Create navigation keyboard"""
+        keyboard = []
+        nav_row = []
+        
+        if "back" in NAVIGATION_BUTTONS:
+            nav_row.append(InlineKeyboardButton(NAVIGATION_BUTTONS["back"], callback_data="back"))
+        if "next" in NAVIGATION_BUTTONS:
+            nav_row.append(InlineKeyboardButton(NAVIGATION_BUTTONS["next"], callback_data="next"))
+        
+        if nav_row:
+            keyboard.append(nav_row)
             
-            params = {'key': license_key}
+        if show_tutorial:
+            keyboard.append([InlineKeyboardButton("توضیحات و آموزش", callback_data="tutorial")])
             
-            logger.info(f"Sending license verification request to: {url}")
-            logger.info(f"Request params: {params}")
+        keyboard.append([InlineKeyboardButton(NAVIGATION_BUTTONS["back_to_main"], callback_data="main_menu")])
+        
+        return InlineKeyboardMarkup(keyboard)
+
+    async def check_access(self, update: Update, section: str) -> bool:
+        """Check if user has access to the section"""
+        user_id = str(update.effective_user.id)
+        
+        # If user is VIP, they have access to everything
+        if user_manager.is_vip(user_id):
+            return True
             
-            async with session.get(url, params=params, headers=headers) as response:
-                logger.info(f"Response status: {response.status}")
-                text = await response.text()
-                logger.info(f"Response body: {text}")
-                
-                if response.status == 200:
-                    try:
-                        data = json.loads(text)
-                        return data.get('status') == 'valid'
-                    except json.JSONDecodeError:
-                        logger.error("Failed to parse JSON response")
-                        return False
+        # If section is locked for free users, deny access
+        if section in LOCKED_SECTIONS:
+            await update.callback_query.answer(MESSAGES["vip_only"], show_alert=True)
+            return False
+            
+        # Check usage limits for free sections
+        if section in FREE_LIMITS:
+            usage_count = user_manager.get_usage_count(user_id, section)
+            if usage_count >= FREE_LIMITS[section]:
+                await update.callback_query.answer(MESSAGES["free_limit_reached"], show_alert=True)
                 return False
                 
-    except Exception as e:
-        logger.error(f"License verification error: {str(e)}")
-        return False
+        return True
 
-def get_main_keyboard(user_id: str):
-    """Get main keyboard based on user's license status."""
-    keyboard = []
-    
-    if user_id in user_licenses and user_licenses[user_id]:
-        keyboard.extend([
-            [
-                InlineKeyboardButton("چت با هوش مصنوعی 🤖", callback_data="chat"),
-                InlineKeyboardButton("آخرین مطالب 📚", callback_data="posts")
-            ],
-            [InlineKeyboardButton("خروج از حساب 🚪", callback_data="logout")]
-        ])
-    else:
-        keyboard.append([InlineKeyboardButton("وارد کردن لایسنس 🔑", callback_data="license")])
-    
-    return InlineKeyboardMarkup(keyboard)
-
-# Add after the get_main_keyboard function
-def get_hook_keyboard(user_id: str):
-    """Get keyboard with navigation buttons for hooks."""
-    keyboard = [
-        [
-            InlineKeyboardButton("⬅️ قلاب قبلی", callback_data="prev_hook"),
-            InlineKeyboardButton("قلاب بعدی ➡️", callback_data="next_hook")
-        ],
-        [InlineKeyboardButton("🏠 بازگشت به منو", callback_data="menu")]
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-async def show_post(update: Update, context: ContextTypes.DEFAULT_TYPE, page=1):
-    """Show WordPress post with navigation buttons."""
-    post, total_pages = await get_wordpress_posts(page)
-    if not post:
-        await update.callback_query.message.edit_text(
-            "❌ خطا در دریافت مطلب. لطفاً بعداً تلاش کنید.",
-            reply_markup=get_main_keyboard(str(update.effective_user.id))
-        )
-        return
-
-    user_id = str(update.effective_user.id)
-    user_current_post[user_id] = page
-
-    keyboard = []
-    nav_buttons = []
-    
-    if page > 1:
-        nav_buttons.append(InlineKeyboardButton("قبلی ⬅️", callback_data=f"post_{page-1}"))
-    if page < total_pages:
-        nav_buttons.append(InlineKeyboardButton("➡️ بعدی", callback_data=f"post_{page+1}"))
-    
-    if nav_buttons:
-        keyboard.append(nav_buttons)
-    
-    keyboard.append([InlineKeyboardButton("🏠 بازگشت به منو", callback_data="menu")])
-    
-    title = post.get('title', {}).get('rendered', '')
-    excerpt = post.get('excerpt', {}).get('rendered', '')
-    link = post.get('link', '')
-    
-    message_text = f"📝 *{title}*\n\n{excerpt}\n\n[مشاهده کامل مطلب]({link})"
-    
-    try:
-        await update.callback_query.message.edit_text(
-            message_text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode=ParseMode.MARKDOWN,
-            disable_web_page_preview=True
-        )
-    except Exception as e:
-        logger.error(f"Error showing post: {e}")
-        await update.callback_query.message.edit_text(
-            "❌ خطا در نمایش مطلب. لطفاً بعداً تلاش کنید.",
-            reply_markup=get_main_keyboard(str(update.effective_user.id))
-        )
-
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /start command."""
-    user_id = str(update.effective_user.id)
-    await update.message.reply_text(
-        "به ربات میلیونی‌شو خوش آمدید! 👋\n"
-        "لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
-        reply_markup=get_main_keyboard(user_id)
-    )
-
-async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle button clicks."""
-    query = update.callback_query
-    user_id = str(update.effective_user.id)
-    
-    await query.answer()
-    
-    if query.data == "license":
-        user_states[user_id] = "awaiting_license"
-        await query.message.edit_text(
-            "لطفاً کد لایسنس خود را وارد کنید:",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🏠 بازگشت به منو", callback_data="menu")
-            ]])
-        )
-    
-    # Add these new conditions for hook navigation
-    elif query.data in ["prev_hook", "next_hook"]:
-        if user_id not in user_states or user_states[user_id] != "viewing_hooks":
-            await query.message.edit_text(
-                "لطفاً ابتدا موضوع خود را وارد کنید:",
-                reply_markup=get_main_keyboard(user_id)
-            )
+    async def send_content(self, update: Update, section: str, index: int) -> None:
+        """Send content to user with appropriate format and keyboard"""
+        content = content_manager.get_content(section, index)
+        if not content:
+            await update.callback_query.answer("محتوای مورد نظر یافت نشد", show_alert=True)
             return
             
-        topic = context.user_data.get("current_topic", "")
-        if not topic:
-            await query.message.edit_text(
-                "لطفاً ابتدا موضوع خود را وارد کنید:",
-                reply_markup=get_main_keyboard(user_id)
-            )
-            return
-            
-        hook = get_random_hook(user_id, topic)
-        await query.message.edit_text(
-            f"✨ قلاب پیشنهادی:\n\n{hook}",
-            reply_markup=get_hook_keyboard(user_id)
-        )
-        return
-
-    # Modify the chat handler to include hook templates
-    elif query.data == "chat":
-        if user_id in user_licenses and user_licenses[user_id]:
-            user_states[user_id] = "awaiting_topic"
-            await query.message.edit_text(
-                "🎯 لطفاً موضوع مورد نظر خود را وارد کنید:\n\n"
-                "مثال: دیجیتال مارکتینگ، کسب درآمد از اینستاگرام، افزایش فروش و...\n\n"
-                "✨ می‌توانید از قالب‌های آماده استفاده کنید یا محتوای هوشمند تولید کنید.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📝 استفاده از قالب‌های آماده", callback_data="use_templates")],
-                    [InlineKeyboardButton("🤖 تولید محتوای هوشمند", callback_data="use_ai")],
-                    [InlineKeyboardButton("🏠 بازگشت به منو", callback_data="menu")]
-                ])
+        section_size = content_manager.get_section_size(section)
+        message = f"{content.text}\n\n{index + 1} از {section_size}"
+        
+        # Handle different media types
+        if content.media_path and content.media_type:
+            if content.media_type == "photo":
+                await update.callback_query.message.reply_photo(
+                    photo=content.media_path,
+                    caption=message,
+                    reply_markup=self.get_navigation_keyboard()
+                )
+            elif content.media_type == "video":
+                await update.callback_query.message.reply_video(
+                    video=content.media_path,
+                    caption=message,
+                    reply_markup=self.get_navigation_keyboard()
+                )
+            elif content.media_type == "voice":
+                await update.callback_query.message.reply_voice(
+                    voice=content.media_path,
+                    caption=message,
+                    reply_markup=self.get_navigation_keyboard()
             )
         else:
-            await query.message.edit_text(
-                "برای استفاده از این بخش نیاز به لایسنس معتبر دارید.",
-                reply_markup=get_main_keyboard(user_id)
+            await update.callback_query.message.edit_text(
+                text=message,
+                reply_markup=self.get_navigation_keyboard(),
+                parse_mode=ParseMode.HTML
             )
-    
-    elif query.data == "use_templates":
-        user_states[user_id] = "awaiting_topic_template"
-        await query.message.edit_text(
-            "🎯 لطفاً موضوع خود را وارد کنید تا قالب‌های آماده را نمایش دهم:",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🏠 بازگشت به منو", callback_data="menu")
-            ]])
-        )
-    
-    elif query.data == "use_ai":
-        user_states[user_id] = "awaiting_topic_ai"
-        await query.message.edit_text(
-            "🎯 لطفاً موضوع خود را وارد کنید تا محتوای هوشمند تولید کنم:",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🏠 بازگشت به منو", callback_data="menu")
-            ]])
-        )
 
-    elif query.data == "posts":
-        await show_post(update, context, 1)
-    
-    elif query.data.startswith("post_"):
-        page = int(query.data.split("_")[1])
-        await show_post(update, context, page)
-    
-    elif query.data == "logout":
-        if user_id in user_licenses:
-            del user_licenses[user_id]
-        if user_id in user_states:
-            del user_states[user_id]
-        if user_id in user_current_post:
-            del user_current_post[user_id]
-        
-        await query.message.edit_text(
-            "✅ شما با موفقیت خارج شدید.\n"
-            "برای استفاده مجدد، لایسنس خود را وارد کنید:",
-            reply_markup=get_main_keyboard(user_id)
-        )
-    
-    elif query.data == "menu":
-        await query.message.edit_text(
-            "به ربات میلیونی‌شو خوش آمدید! 👋\n"
-            "لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
-            reply_markup=get_main_keyboard(user_id)
-        )
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle user messages."""
-    if not update.message or not update.message.text:
-        return
-        
-    user_id = str(update.effective_user.id)
-    message_text = update.message.text.strip()
-    
-    if user_id not in user_states:
-        await start_command(update, context)
-        return
-    
-    state = user_states[user_id]
-    
-    if state == "awaiting_license":
-        if not message_text:
-            await update.message.reply_text(
-                "لطفاً یک کد لایسنس معتبر وارد کنید.",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🏠 بازگشت به منو", callback_data="menu")
-                ]])
-            )
-            return
-            
-        is_valid = await verify_license(message_text)
-        
-        if is_valid:
-            user_licenses[user_id] = True
-            user_states[user_id] = None
-            await update.message.reply_text(
-                "✅ لایسنس شما با موفقیت تأیید شد!\n"
-                "حالا می‌توانید از امکانات ربات استفاده کنید.",
-                reply_markup=get_main_keyboard(user_id)
-            )
-        else:
-            await update.message.reply_text(
-                "❌ لایسنس نامعتبر است.\n"
-                "لطفاً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید.",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🏠 بازگشت به منو", callback_data="menu")
-                ]])
-            )
-    
-    # Add new state handler for template-based hooks
-    elif state == "awaiting_topic_template":
-        if user_id not in user_licenses or not user_licenses[user_id]:
-            await update.message.reply_text(
-                "برای استفاده از این بخش نیاز به لایسنس معتبر دارید.",
-                reply_markup=get_main_keyboard(user_id)
-            )
-            return
-            
-        context.user_data["current_topic"] = message_text
-        user_states[user_id] = "viewing_hooks"
-        hook = get_random_hook(user_id, message_text)
-        await update.message.reply_text(
-            f"✨ قلاب پیشنهادی:\n\n{hook}",
-            reply_markup=get_hook_keyboard(user_id)
-        )
-    
-    elif state == "awaiting_topic_ai":
-        if user_id not in user_licenses or not user_licenses[user_id]:
-            await update.message.reply_text(
-                "برای استفاده از این بخش نیاز به لایسنس معتبر دارید.",
-                reply_markup=get_main_keyboard(user_id)
-            )
-            return
-            
-        # Use the existing AI-based generation
-        try:
-            await update.message.reply_text("🎯 در حال آماده‌سازی محتوای حرفه‌ای...")
-            
-            system_prompt = random.choice(SYSTEM_PROMPTS).format(topic=message_text)
-            
-            response = client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_prompt
-                    },
-                    {
-                        "role": "user",
-                        "content": f"لطفاً یک هوک (قلاب) حرفه‌ای و تاثیرگذار برای موضوع {message_text} بنویس. هوک باید کاملاً مرتبط با کسب و کار و حرفه‌ای باشد."
-                    }
-                ],
-                temperature=0.7,
-                max_tokens=150
-            )
-            
-            generated_hook = response.choices[0].message.content.strip()
-            
-            await update.message.reply_text(
-                f"✨ هوک پیشنهادی شما:\n\n{generated_hook}",
-                reply_markup=get_main_keyboard(user_id)
-            )
-            
-        except Exception as e:
-            logger.error(f"GPT error: {e}")
-            await update.message.reply_text(
-                "❌ متأسفانه در پردازش درخواست شما مشکلی پیش آمد.\n"
-                "لطفاً چند دقیقه دیگر دوباره تلاش کنید.",
-                reply_markup=get_main_keyboard(user_id)
-            )
-    
-    else:
-        await update.message.reply_text(
-            "لطفاً از منوی اصلی یکی از گزینه‌ها را انتخاب کنید:",
-            reply_markup=get_main_keyboard(user_id)
-        )
-
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle errors."""
-    logger.error(f"Error: {context.error}")
-    try:
+    async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle errors"""
+        logger.error(f"Exception while handling an update: {context.error}")
         if update and update.effective_message:
             await update.effective_message.reply_text(
-                "❌ متأسفانه خطایی رخ داد.\n"
-                "لطفاً دوباره تلاش کنید.",
+                "متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید."
+            ) 
+
+    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /start command"""
+        user_id = str(update.effective_user.id)
+        user_manager.init_user(user_id)
+        await update.message.reply_text(
+            MESSAGES["welcome"],
+            reply_markup=self.get_main_menu_keyboard()
+        )
+
+    async def handle_template(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle template section"""
+        if not await self.check_access(update, "template"):
+            return
+            
+        await update.callback_query.message.edit_text(
+            "لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
+            reply_markup=self.get_template_submenu_keyboard()
+        )
+
+    async def handle_text_template(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle text template section"""
+        user_id = str(update.effective_user.id)
+        if not await self.check_access(update, "text_template"):
+            return
+            
+        user_manager.set_current_section(user_id, "text_template")
+        index = user_manager.get_current_index(user_id, "text_template")
+        await self.send_content(update, "text_template", index)
+        user_manager.increment_usage(user_id, "template")
+
+    async def handle_image_template(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle image template section"""
+        user_id = str(update.effective_user.id)
+        if not await self.check_access(update, "image_template"):
+            return
+            
+        user_manager.set_current_section(user_id, "image_template")
+        index = user_manager.get_current_index(user_id, "image_template")
+        await self.send_content(update, "image_template", index)
+        user_manager.increment_usage(user_id, "template")
+
+    async def handle_tutorial(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle tutorial section"""
+        user_id = str(update.effective_user.id)
+        current_section = user_manager.get_current_section(user_id)
+        
+        if not await self.check_access(update, "tutorial"):
+            return
+            
+        tutorial = content_manager.get_tutorial(current_section)
+        if tutorial:
+            keyboard = [[
+                InlineKeyboardButton(NAVIGATION_BUTTONS["back"], callback_data="back"),
+                InlineKeyboardButton(NAVIGATION_BUTTONS["back_to_main"], callback_data="main_menu")
+            ]]
+            
+            if tutorial.media_path and tutorial.media_type == "document":
+                await update.callback_query.message.reply_document(
+                    document=tutorial.media_path,
+                    caption=tutorial.text,
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            else:
+                await update.callback_query.message.edit_text(
+                    tutorial.text,
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode=ParseMode.HTML
+                )
+        else:
+            await update.callback_query.answer("محتوای آموزشی در دسترس نیست", show_alert=True)
+
+    async def handle_next(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle next button"""
+        user_id = str(update.effective_user.id)
+        current_section = user_manager.get_current_section(user_id)
+        if not current_section:
+            return
+            
+        current_index = user_manager.get_current_index(user_id, current_section)
+        section_size = content_manager.get_section_size(current_section)
+        
+        next_index = (current_index + 1) % section_size
+        user_manager.set_current_index(user_id, current_section, next_index)
+        await self.send_content(update, current_section, next_index)
+
+    async def handle_back(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle back button"""
+        user_id = str(update.effective_user.id)
+        current_section = user_manager.get_current_section(user_id)
+        if not current_section:
+            return
+            
+        current_index = user_manager.get_current_index(user_id, current_section)
+        section_size = content_manager.get_section_size(current_section)
+        
+        prev_index = (current_index - 1) % section_size
+        user_manager.set_current_index(user_id, current_section, prev_index)
+        await self.send_content(update, current_section, prev_index)
+
+    async def handle_main_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Return to main menu"""
+        await update.callback_query.message.edit_text(
+            MESSAGES["welcome"],
+            reply_markup=self.get_main_menu_keyboard()
+        )
+
+    async def handle_reels_idea(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle reels idea section"""
+        user_id = str(update.effective_user.id)
+        if not await self.check_access(update, "reels_idea"):
+            return
+            
+        user_manager.set_current_section(user_id, "reels_idea")
+        index = user_manager.get_current_index(user_id, "reels_idea")
+        await self.send_content(update, "reels_idea", index)
+        user_manager.increment_usage(user_id, "reels_idea")
+
+    async def handle_call_to_action(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle call to action section"""
+        user_id = str(update.effective_user.id)
+        if not await self.check_access(update, "call_to_action"):
+            return
+            
+        user_manager.set_current_section(user_id, "call_to_action")
+        index = user_manager.get_current_index(user_id, "call_to_action")
+        await self.send_content(update, "call_to_action", index)
+        user_manager.increment_usage(user_id, "call_to_action")
+
+    async def handle_caption(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle caption section"""
+        user_id = str(update.effective_user.id)
+        if not await self.check_access(update, "caption"):
+            return
+            
+        user_manager.set_current_section(user_id, "caption")
+        index = user_manager.get_current_index(user_id, "caption")
+        await self.send_content(update, "caption", index)
+        user_manager.increment_usage(user_id, "caption")
+
+    async def handle_complete_idea(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle complete idea section"""
+        user_id = str(update.effective_user.id)
+        if not await self.check_access(update, "complete_idea"):
+            return
+            
+        user_manager.set_current_section(user_id, "complete_idea")
+        index = user_manager.get_current_index(user_id, "complete_idea")
+        await self.send_content(update, "complete_idea", index)
+
+    async def handle_interactive_story(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle interactive story section"""
+        user_id = str(update.effective_user.id)
+        if not await self.check_access(update, "interactive_story"):
+            return
+            
+        user_manager.set_current_section(user_id, "interactive_story")
+        index = user_manager.get_current_index(user_id, "interactive_story")
+        await self.send_content(update, "interactive_story", index)
+        user_manager.increment_usage(user_id, "interactive_story")
+
+    async def handle_bio(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle bio section"""
+        user_id = str(update.effective_user.id)
+        if not await self.check_access(update, "bio"):
+            return
+            
+        user_manager.set_current_section(user_id, "bio")
+        index = user_manager.get_current_index(user_id, "bio")
+        await self.send_content(update, "bio", index)
+        user_manager.increment_usage(user_id, "bio")
+
+    async def handle_roadmap(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle roadmap section"""
+        if not await self.check_access(update, "roadmap"):
+            return
+            
+        content = content_manager.get_content("roadmap", 0)  # Roadmap is a single content
+        if content:
+            await update.callback_query.message.edit_text(
+                content.text,
                 reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🏠 بازگشت به منو", callback_data="menu")
+                    InlineKeyboardButton(NAVIGATION_BUTTONS["back_to_main"], callback_data="main_menu")
+                ]]),
+                parse_mode=ParseMode.HTML
+            )
+
+    async def handle_all_files(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle all files download section"""
+        if not await self.check_access(update, "all_files"):
+            return
+            
+        zip_path = content_manager.get_all_content_zip()
+        if zip_path:
+            await update.callback_query.message.reply_document(
+                document=zip_path,
+                caption="تمامی فایل‌های میلیونی‌شو",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton(NAVIGATION_BUTTONS["back_to_main"], callback_data="main_menu")
                 ]])
             )
-    except:
-        pass
+        else:
+            await update.callback_query.answer("فایل در دسترس نیست", show_alert=True)
 
-def main():
-    """Start the bot."""
-    try:
-        # Configure proxy settings for the entire application
-        if PROXY_URL:
-            os.environ['HTTPS_PROXY'] = PROXY_URL
-            os.environ['HTTP_PROXY'] = PROXY_URL
-            logger.info(f"Using proxy: {PROXY_URL}")
+    async def handle_vip(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle VIP subscription section"""
+        user_id = str(update.effective_user.id)
         
-        # Create and configure the application
-        application = (
-            Application.builder()
-            .token(TELEGRAM_TOKEN)
-            .build()
+        if user_manager.is_vip(user_id):
+            await update.callback_query.message.edit_text(
+                MESSAGES["already_subscribed"],
+                reply_markup=self.get_main_menu_keyboard()
+            )
+            return
+            
+        keyboard = [
+            [InlineKeyboardButton("خرید از طریق سایت", url=f"{WORDPRESS_BASE_URL}/vip")],
+            [InlineKeyboardButton("خرید از طریق ربات", callback_data="activate_code")],
+            [InlineKeyboardButton(NAVIGATION_BUTTONS["back_to_main"], callback_data="main_menu")]
+        ]
+        
+        await update.callback_query.message.edit_text(
+            "برای تهیه اشتراک VIP یکی از روش‌های زیر را انتخاب کنید:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
-        
-        # Add handlers
-        application.add_handler(CommandHandler("start", start_command))
-        application.add_handler(CallbackQueryHandler(handle_button))
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        application.add_error_handler(error_handler)
-        
-        # Start the bot
-        logger.info("Starting bot...")
-        application.run_polling(allowed_updates=Update.ALL_TYPES)
-        
-    except Exception as e:
-        logger.error(f"Failed to start bot: {e}")
-        raise
 
-if __name__ == '__main__':
-    main()
+    async def handle_favorites(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle favorites section"""
+        user_id = str(update.effective_user.id)
+        if not await self.check_access(update, "favorites"):
+            return
+            
+        favorites = user_manager.get_favorites(user_id)
+        if not favorites:
+            await update.callback_query.message.edit_text(
+                "شما هنوز محتوایی را به علاقه‌مندی‌ها اضافه نکرده‌اید.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton(NAVIGATION_BUTTONS["back_to_main"], callback_data="main_menu")
+                ]])
+            )
+            return
+            
+        # Show list of favorites with their sections
+        message = "محتوای مورد علاقه شما:\n\n"
+        for content_id in favorites:
+            section = user_manager.get_current_section(user_id)
+            content = content_manager.get_content_by_id(section, content_id)
+            if content:
+                message += f"- {content.text[:50]}...\n"
+        
+        await update.callback_query.message.edit_text(
+            message,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(NAVIGATION_BUTTONS["back_to_main"], callback_data="main_menu")
+            ]]),
+            parse_mode=ParseMode.HTML
+        )
+
+    async def handle_activation_code(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle activation code entry"""
+        await update.callback_query.message.edit_text(
+            "لطفاً کد فعال‌سازی خود را وارد کنید:",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(NAVIGATION_BUTTONS["back_to_main"], callback_data="main_menu")
+            ]])
+        )
+
+    async def handle_activation_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle activation code verification"""
+        user_id = str(update.effective_user.id)
+        activation_code = update.message.text.strip()
+        
+        # Here you should implement the actual code verification logic
+        # For now, we'll just set VIP status
+        user_manager.set_vip(user_id, True)
+        
+        await update.message.reply_text(
+            "تبریک! اشتراک VIP شما با موفقیت فعال شد.",
+            reply_markup=self.get_main_menu_keyboard()
+        )
+
+# Create bot instance
+bot = MillionishoBot()
+
+if __name__ == "__main__":
+    bot.run() 
