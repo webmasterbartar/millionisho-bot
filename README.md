@@ -1,133 +1,116 @@
-# Millionisho Telegram Bot (ربات تلگرام میلیونی‌شو) 🤖
+# 🤖 ربات تلگرام میلیونی‌شو
 
-A Telegram bot integrated with WordPress and OpenAI GPT-4 for the Millionisho platform.
+ربات هوشمند تلگرام برای ارائه قالب‌ها، ایده‌ها و آموزش‌های اینستاگرام مارکتینگ
 
-یک ربات تلگرام با قابلیت یکپارچه‌سازی با وردپرس و OpenAI GPT-4 برای پلتفرم میلیونی‌شو.
+## 🌟 امکانات
 
-## Features (ویژگی‌ها) ✨
+### 📝 قالب‌ها و محتوا
+- قالب‌های متنی (۴۷۰+ قالب)
+- قالب‌های تصویری (۶۰+ قالب)
+- ایده‌های ریلز
+- کال تو اکشن‌های حرفه‌ای
+- کپشن‌های جذاب
+- بایوهای حرفه‌ای
+- نقشه راه الگوریتم اینستاگرام
 
-- License verification system (سیستم تأیید لایسنس)
-- Integration with OpenAI GPT-4 (یکپارچه‌سازی با OpenAI GPT-4)
-- WordPress API integration (یکپارچه‌سازی با API وردپرس)
-- Persistent license caching (ذخیره‌سازی موقت لایسنس‌ها)
-- Graceful error handling (مدیریت خطاهای هوشمند)
-- Proxy support (پشتیبانی از پروکسی)
+### 👥 مدیریت کاربران
+- سیستم عضویت VIP
+- محدودیت دسترسی کاربران رایگان
+- امکان افزودن به علاقه‌مندی‌ها
+- آمار استفاده از هر بخش
 
-## Requirements (پیش‌نیازها) 📋
+### 🎯 ویژگی‌های اصلی
+- رابط کاربری ساده و کاربرپسند
+- دسته‌بندی هوشمند محتوا
+- امکان دریافت همه فایل‌ها به صورت یکجا
+- سیستم آموزش برای هر بخش
+- پشتیبانی از انواع محتوا (متن، تصویر، ویدیو، صوت)
 
-- Python 3.8 or higher (پایتون 3.8 یا بالاتر)
-- WordPress site with Millionisho plugin (سایت وردپرس با افزونه میلیونی‌شو)
-- Telegram Bot Token (توکن ربات تلگرام)
-- OpenAI API Key (کلید API اوپن‌ای‌آی)
+## 🚀 نصب و راه‌اندازی
 
-## Installation (نصب و راه‌اندازی) 🚀
+### پیش‌نیازها
+- Python 3.8 یا بالاتر
+- pip (مدیر بسته پایتون)
+- وردپرس با افزونه میلیونی‌شو
 
-1. Clone the repository (کلون کردن مخزن):
+### مراحل نصب
+
+1. کلون کردن مخزن:
 ```bash
-git clone https://github.com/yourusername/millionisho-bot.git
+git clone https://github.com/webmasterbartar/millionisho-bot.git
 cd millionisho-bot
 ```
 
-2. Create virtual environment (ساخت محیط مجازی):
+2. ایجاد محیط مجازی:
 ```bash
 python -m venv venv
-# Windows
+# در ویندوز
 venv\Scripts\activate
-# Linux/Mac
+# در لینوکس/مک
 source venv/bin/activate
 ```
 
-3. Install dependencies (نصب وابستگی‌ها):
+3. نصب وابستگی‌ها:
 ```bash
 pip install -r requirements.txt
 ```
 
-4. Set up environment variables (تنظیم متغیرهای محیطی):
+4. کپی فایل .env.example به .env:
 ```bash
 cp .env.example .env
-# Edit .env file with your configurations
 ```
 
-## Configuration (پیکربندی) ⚙️
-
-Create a `.env` file with the following variables:
-
-```env
-# Telegram Bot Configuration
-TELEGRAM_TOKEN=your_telegram_token_here
-
-# OpenAI Configuration
-OPENAI_API_KEY=your_openai_api_key_here
-
-# WordPress API Configuration
-WORDPRESS_BASE_URL=https://your-wordpress-site.com
-
-# Proxy Configuration (optional)
-PROXY_URL=http://127.0.0.1:8118
-
-# Cache Configuration
-CACHE_TTL=3600
-CACHE_MAX_SIZE=1000
+5. ویرایش فایل .env و تنظیم مقادیر مورد نیاز:
+```
+TELEGRAM_TOKEN=your_telegram_bot_token
+WORDPRESS_BASE_URL=your_wordpress_site_url
 ```
 
-## Running the Bot (اجرای ربات) 🏃‍♂️
-
-### Local Development (توسعه لوکال)
-
+6. اجرای ربات:
 ```bash
 python bot.py
 ```
 
-### Production Deployment (استقرار در محیط تولید)
+## 📁 ساختار پروژه
 
-The bot is configured to run on Railway. Simply push to the repository and Railway will automatically deploy.
+```
+millionisho-bot/
+├── bot.py                 # فایل اصلی ربات
+├── config.py             # تنظیمات پروژه
+├── menu_config.py        # تنظیمات منوها
+├── user_manager.py       # مدیریت کاربران
+├── content_manager.py    # مدیریت محتوا
+├── requirements.txt      # وابستگی‌های پروژه
+├── content/             # پوشه محتوا
+│   ├── images/         # تصاویر
+│   ├── videos/         # ویدیوها
+│   ├── docs/           # فایل‌های PDF
+│   └── tutorials/      # آموزش‌ها
+└── .env                 # متغیرهای محیطی
+```
 
-ربات برای اجرا روی Railway پیکربندی شده است. کافیست تغییرات را push کنید تا Railway به صورت خودکار مستقر شود.
+## 🔧 پیکربندی
 
-## WordPress Plugin (افزونه وردپرس) 🔌
+### تنظیمات محتوا
+محتوای هر بخش در فایل‌های JSON در پوشه `content` ذخیره می‌شود. هر فایل JSON شامل آرایه‌ای از محتواست که هر آیتم دارای:
+- شناسه یکتا
+- متن
+- مسیر فایل رسانه (اختیاری)
+- نوع رسانه (اختیاری)
+- اطلاعات اضافی (اختیاری)
 
-1. Install the Millionisho WordPress plugin (نصب افزونه وردپرس میلیونی‌شو)
-2. Activate the plugin (فعال‌سازی افزونه)
-3. Configure the license settings (پیکربندی تنظیمات لایسنس)
+### محدودیت‌های دسترسی
+- کاربران رایگان: دسترسی به 3 محتوا در هر بخش
+- کاربران VIP: دسترسی نامحدود به تمام بخش‌ها
 
-## Error Handling (مدیریت خطاها) 🔧
+## 🤝 مشارکت
 
-The bot includes comprehensive error handling:
-- License verification errors
-- OpenAI API errors
-- Network timeouts
-- Invalid user inputs
+برای مشارکت در پروژه:
+1. پروژه را fork کنید
+2. یک branch جدید ایجاد کنید
+3. تغییرات خود را commit کنید
+4. یک pull request ایجاد کنید
 
-ربات شامل مدیریت خطاهای جامع است:
-- خطاهای تأیید لایسنس
-- خطاهای API اوپن‌ای‌آی
-- تایم‌اوت‌های شبکه
-- ورودی‌های نامعتبر کاربر
-
-## Logging (ثبت رویدادها) 📝
-
-Logs are stored in `bot.log` with the following information:
-- Bot startup/shutdown
-- License verifications
-- API calls
-- Error messages
-
-لاگ‌ها در فایل `bot.log` ذخیره می‌شوند و شامل اطلاعات زیر هستند:
-- شروع/توقف ربات
-- تأییدیه‌های لایسنس
-- فراخوانی‌های API
-- پیام‌های خطا
-
-## Contributing (مشارکت) 👥
-
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
-
-## License (مجوز) 📄
-
-This project is proprietary and confidential. All rights reserved.
+## 📄 مجوز
 
 این پروژه اختصاصی و محرمانه است. تمامی حقوق محفوظ است. 
