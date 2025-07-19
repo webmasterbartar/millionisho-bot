@@ -41,12 +41,18 @@ class MillionishoBot:
     def __init__(self):
         """Initialize bot with required handlers"""
         self.application = Application.builder().token(TELEGRAM_TOKEN).build()
+        self.current_section = {}
+        self.current_action = {}
+        self.temp_content = {}
+        self.admin_state = {}  # برای نگهداری وضعیت ادمین‌ها
         self._setup_handlers()
         
     def _setup_handlers(self):
         """Setup all necessary command and callback handlers"""
         # Command handlers
         self.application.add_handler(CommandHandler("start", self.start_command))
+        self.application.add_handler(CommandHandler("help", self.help_command))
+        self.application.add_handler(CommandHandler("save", self.save_command))
         
         # Callback handlers for main menu
         self.application.add_handler(CallbackQueryHandler(self.handle_template, pattern="^template$"))
@@ -74,6 +80,13 @@ class MillionishoBot:
         # VIP handlers
         self.application.add_handler(CallbackQueryHandler(self.handle_activation_code, pattern="^activate_code$"))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_activation_input))
+        
+        # Admin handlers
+        self.application.add_handler(CallbackQueryHandler(self.handle_admin_callback, pattern="^admin_"))
+        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text_input))
+        self.application.add_handler(MessageHandler(filters.PHOTO, self.handle_photo))
+        self.application.add_handler(MessageHandler(filters.VIDEO, self.handle_video))
+        self.application.add_handler(MessageHandler(filters.DOCUMENT, self.handle_document))
         
         # Error handler
         self.application.add_error_handler(self.error_handler)
@@ -198,6 +211,37 @@ class MillionishoBot:
             MESSAGES["welcome"],
             reply_markup=self.get_main_menu_keyboard()
         )
+
+    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /help command"""
+        await update.message.reply_text(
+            "لطفاً دستورات زیر را در اختیار دارید:\n\n"
+            "/start - شروع کردن با ربات\n"
+            "/help - دریافت دستورات\n"
+            "/save - ذخیره محتوای اضافه شده برای ادمین\n\n"
+            "برای دسترسی به پنل ادمین، کد فعال‌سازی را وارد کنید."
+        )
+
+    async def save_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /save command for admin content"""
+        user_id = str(update.effective_user.id)
+        if user_id not in ADMIN_IDS:
+            return
+            
+        if await self.save_content(user_id):
+            await update.message.reply_text(
+                "محتوا با موفقیت ذخیره شد.",
+                reply_markup=self.get_main_menu_keyboard()
+            )
+            # پاک کردن محتوای موقت
+            del self.temp_content[user_id]
+            if user_id in self.admin_state:
+                del self.admin_state[user_id]
+        else:
+            await update.message.reply_text(
+                "متأسفانه در ذخیره محتوا مشکلی پیش آمد. لطفاً دوباره تلاش کنید.",
+                reply_markup=self.get_main_menu_keyboard()
+            )
 
     async def handle_template(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle template section"""
@@ -469,6 +513,329 @@ class MillionishoBot:
             "تبریک! اشتراک VIP شما با موفقیت فعال شد.",
             reply_markup=self.get_main_menu_keyboard()
         )
+
+    async def handle_text_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle text input"""
+        user_id = str(update.effective_user.id)
+        text = update.message.text
+
+        # دستور مخفی برای دسترسی به پنل مدیریت
+        if text == "!admin" and user_id in ADMIN_IDS:
+            keyboard = [
+                [
+                    InlineKeyboardButton("افزودن محتوا", callback_data="admin_add"),
+                    InlineKeyboardButton("ویرایش محتوا", callback_data="admin_edit")
+                ],
+                [
+                    InlineKeyboardButton("حذف محتوا", callback_data="admin_delete"),
+                    InlineKeyboardButton("مشاهده محتوا", callback_data="admin_view")
+                ],
+                [InlineKeyboardButton("بازگشت به منو", callback_data="menu")]
+            ]
+            await update.message.reply_text(
+                "🔐 پنل مدیریت محتوا\nلطفاً عملیات مورد نظر را انتخاب کنید:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return
+
+        # پردازش ورودی‌های پنل مدیریت
+        if user_id in self.admin_state:
+            action, section = self.admin_state[user_id]
+            if action == "add_text":
+                self.temp_content[user_id] = {"text": text}
+                await update.message.reply_text(
+                    "متن ذخیره شد. اگر می‌خواهید فایل رسانه‌ای اضافه کنید، آن را ارسال کنید.\n"
+                    "در غیر این صورت /save را بزنید."
+                )
+            elif action == "edit_id":
+                try:
+                    content_id = int(text)
+                    self.temp_content[user_id] = {"id": content_id}
+                    self.admin_state[user_id] = ("edit_text", section)
+                    await update.message.reply_text("لطفاً متن جدید را وارد کنید:")
+                except ValueError:
+                    await update.message.reply_text("لطفاً یک شماره معتبر وارد کنید.")
+            elif action == "edit_text":
+                content_id = self.temp_content[user_id]["id"]
+                if await self.edit_content(section, content_id, {"text": text}):
+                    await update.message.reply_text(
+                        "محتوا با موفقیت ویرایش شد.",
+                        reply_markup=self.get_main_menu_keyboard()
+                    )
+                else:
+                    await update.message.reply_text("خطا در ویرایش محتوا")
+            elif action == "delete":
+                try:
+                    content_id = int(text)
+                    if await self.delete_content(section, content_id):
+                        await update.message.reply_text(
+                            "محتوا با موفقیت حذف شد.",
+                            reply_markup=self.get_main_menu_keyboard()
+                        )
+                    else:
+                        await update.message.reply_text("خطا در حذف محتوا")
+                except ValueError:
+                    await update.message.reply_text("لطفاً یک شماره معتبر وارد کنید.")
+
+    async def handle_admin_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle admin panel callbacks"""
+        user_id = str(update.effective_user.id)
+        if user_id not in ADMIN_IDS:
+            return
+
+        query = update.callback_query
+        await query.answer()
+        
+        action = query.data.replace("admin_", "")
+        
+        if action == "add":
+            keyboard = [
+                [
+                    InlineKeyboardButton("قالب متنی", callback_data="admin_section_text_template"),
+                    InlineKeyboardButton("قالب تصویری", callback_data="admin_section_image_template")
+                ],
+                [
+                    InlineKeyboardButton("ایده ریلز", callback_data="admin_section_reels_idea"),
+                    InlineKeyboardButton("کال تو اکشن", callback_data="admin_section_call_to_action")
+                ],
+                [
+                    InlineKeyboardButton("کپشن", callback_data="admin_section_caption"),
+                    InlineKeyboardButton("بایو", callback_data="admin_section_bio")
+                ],
+                [InlineKeyboardButton("بازگشت", callback_data="admin_back")]
+            ]
+            await query.message.edit_text(
+                "لطفاً بخش مورد نظر را انتخاب کنید:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        elif action.startswith("section_"):
+            section = action.replace("section_", "")
+            self.admin_state[user_id] = ("add_text", section)
+            await query.message.edit_text("لطفاً متن محتوای جدید را وارد کنید:")
+        elif action == "edit":
+            keyboard = [
+                [
+                    InlineKeyboardButton("قالب متنی", callback_data="admin_edit_text_template"),
+                    InlineKeyboardButton("قالب تصویری", callback_data="admin_edit_image_template")
+                ],
+                [
+                    InlineKeyboardButton("ایده ریلز", callback_data="admin_edit_reels_idea"),
+                    InlineKeyboardButton("کال تو اکشن", callback_data="admin_edit_call_to_action")
+                ],
+                [
+                    InlineKeyboardButton("کپشن", callback_data="admin_edit_caption"),
+                    InlineKeyboardButton("بایو", callback_data="admin_edit_bio")
+                ],
+                [InlineKeyboardButton("بازگشت", callback_data="admin_back")]
+            ]
+            await query.message.edit_text(
+                "لطفاً بخش مورد نظر را انتخاب کنید:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        elif action.startswith("edit_"):
+            section = action.replace("edit_", "")
+            self.admin_state[user_id] = ("edit_id", section)
+            await query.message.edit_text("لطفاً شماره محتوای مورد نظر را وارد کنید:")
+        elif action == "delete":
+            keyboard = [
+                [
+                    InlineKeyboardButton("قالب متنی", callback_data="admin_delete_text_template"),
+                    InlineKeyboardButton("قالب تصویری", callback_data="admin_delete_image_template")
+                ],
+                [
+                    InlineKeyboardButton("ایده ریلز", callback_data="admin_delete_reels_idea"),
+                    InlineKeyboardButton("کال تو اکشن", callback_data="admin_delete_call_to_action")
+                ],
+                [
+                    InlineKeyboardButton("کپشن", callback_data="admin_delete_caption"),
+                    InlineKeyboardButton("بایو", callback_data="admin_delete_bio")
+                ],
+                [InlineKeyboardButton("بازگشت", callback_data="admin_back")]
+            ]
+            await query.message.edit_text(
+                "لطفاً بخش مورد نظر را انتخاب کنید:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        elif action.startswith("delete_"):
+            section = action.replace("delete_", "")
+            self.admin_state[user_id] = ("delete", section)
+            await query.message.edit_text("لطفاً شماره محتوای مورد نظر را وارد کنید:")
+        elif action == "view":
+            keyboard = [
+                [
+                    InlineKeyboardButton("قالب متنی", callback_data="admin_view_text_template"),
+                    InlineKeyboardButton("قالب تصویری", callback_data="admin_view_image_template")
+                ],
+                [
+                    InlineKeyboardButton("ایده ریلز", callback_data="admin_view_reels_idea"),
+                    InlineKeyboardButton("کال تو اکشن", callback_data="admin_view_call_to_action")
+                ],
+                [
+                    InlineKeyboardButton("کپشن", callback_data="admin_view_caption"),
+                    InlineKeyboardButton("بایو", callback_data="admin_view_bio")
+                ],
+                [InlineKeyboardButton("بازگشت", callback_data="admin_back")]
+            ]
+            await query.message.edit_text(
+                "لطفاً بخش مورد نظر را انتخاب کنید:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        elif action.startswith("view_"):
+            section = action.replace("view_", "")
+            await self.show_admin_content(query.message, section)
+        elif action == "back":
+            keyboard = [
+                [
+                    InlineKeyboardButton("افزودن محتوا", callback_data="admin_add"),
+                    InlineKeyboardButton("ویرایش محتوا", callback_data="admin_edit")
+                ],
+                [
+                    InlineKeyboardButton("حذف محتوا", callback_data="admin_delete"),
+                    InlineKeyboardButton("مشاهده محتوا", callback_data="admin_view")
+                ],
+                [InlineKeyboardButton("بازگشت به منو", callback_data="menu")]
+            ]
+            await query.message.edit_text(
+                "🔐 پنل مدیریت محتوا\nلطفاً عملیات مورد نظر را انتخاب کنید:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+
+    async def show_admin_content(self, message, section: str) -> None:
+        """Show content for admin"""
+        try:
+            with open(f"content/{section}.json", "r", encoding="utf-8") as f:
+                content = json.load(f)
+                text = f"محتوای بخش {section}:\n\n"
+                for item in content:
+                    text += f"🔹 شماره {item['id']}:\n{item['text'][:100]}...\n\n"
+                
+                keyboard = [[InlineKeyboardButton("بازگشت", callback_data="admin_back")]]
+                await message.edit_text(
+                    text,
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+        except FileNotFoundError:
+            await message.edit_text(
+                f"محتوایی برای بخش {section} یافت نشد.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("بازگشت", callback_data="admin_back")
+                ]])
+            )
+
+    async def save_media_file(self, file_id: str, section: str, media_type: str) -> str:
+        """Save media file to appropriate directory"""
+        file = await self.application.bot.get_file(file_id)
+        
+        # تعیین پسوند فایل بر اساس نوع
+        if media_type == "photo":
+            ext = ".jpg"
+            dir_name = "images"
+        elif media_type == "video":
+            ext = ".mp4"
+            dir_name = "videos"
+        else:
+            ext = ""  # پسوند اصلی فایل حفظ می‌شود
+            dir_name = "docs"
+            
+        # ایجاد دایرکتوری اگر وجود ندارد
+        os.makedirs(f"content/{dir_name}", exist_ok=True)
+        
+        # ایجاد نام فایل یکتا
+        filename = f"{section}_{file_id}{ext}"
+        filepath = f"content/{dir_name}/{filename}"
+        
+        # دانلود و ذخیره فایل
+        await file.download_to_drive(filepath)
+        return filepath
+
+    async def save_content(self, user_id: str) -> bool:
+        """Save content to JSON file"""
+        if user_id not in self.temp_content:
+            return False
+            
+        section = self.admin_state[user_id][1]
+        content = self.temp_content[user_id]
+        filepath = f"content/{section}.json"
+        
+        try:
+            # خواندن محتوای فعلی
+            if os.path.exists(filepath):
+                with open(filepath, "r", encoding="utf-8") as f:
+                    current_content = json.load(f)
+                # تعیین شناسه جدید
+                new_id = max([int(item["id"]) for item in current_content]) + 1
+            else:
+                current_content = []
+                new_id = 1
+                
+            # اگر فایل رسانه وجود دارد، آن را ذخیره می‌کنیم
+            if "media_type" in content and "media_path" in content:
+                media_path = await self.save_media_file(
+                    content["media_path"],
+                    section,
+                    content["media_type"]
+                )
+                content["media_path"] = media_path
+                
+            # افزودن محتوای جدید
+            content["id"] = str(new_id)
+            current_content.append(content)
+            
+            # ذخیره فایل JSON
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(current_content, f, ensure_ascii=False, indent=4)
+                
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error saving content: {e}")
+            return False
+
+    async def edit_content(self, section: str, content_id: int, new_content: dict) -> bool:
+        """Edit existing content"""
+        filepath = f"content/{section}.json"
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                content = json.load(f)
+                
+            # پیدا کردن محتوای مورد نظر
+            for i, item in enumerate(content):
+                if item["id"] == str(content_id):
+                    # به‌روزرسانی محتوا
+                    content[i].update(new_content)
+                    break
+            else:
+                return False
+                
+            # ذخیره تغییرات
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(content, f, ensure_ascii=False, indent=4)
+                
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error editing content: {e}")
+            return False
+
+    async def delete_content(self, section: str, content_id: int) -> bool:
+        """Delete content"""
+        filepath = f"content/{section}.json"
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                content = json.load(f)
+                
+            # حذف محتوای مورد نظر
+            content = [item for item in content if item["id"] != str(content_id)]
+            
+            # ذخیره تغییرات
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(content, f, ensure_ascii=False, indent=4)
+                
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error deleting content: {e}")
+            return False
 
 # Create bot instance
 bot = MillionishoBot()
