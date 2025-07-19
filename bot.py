@@ -84,6 +84,8 @@ class MillionishoBot:
         # Admin handlers
         self.application.add_handler(CallbackQueryHandler(self.handle_admin_callback, pattern="^admin_"))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text_input))
+        
+        # Media handlers
         self.application.add_handler(MessageHandler(filters.PHOTO, self.handle_photo))
         self.application.add_handler(MessageHandler(filters.VIDEO, self.handle_video))
         self.application.add_handler(MessageHandler(filters.DOCUMENT, self.handle_document))
@@ -188,7 +190,7 @@ class MillionishoBot:
                     caption=message,
                     reply_markup=self.get_navigation_keyboard()
             )
-        else:
+    else:
             await update.callback_query.message.edit_text(
                 text=message,
                 reply_markup=self.get_navigation_keyboard(),
@@ -222,27 +224,6 @@ class MillionishoBot:
             "برای دسترسی به پنل ادمین، کد فعال‌سازی را وارد کنید."
         )
 
-    async def save_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /save command for admin content"""
-        user_id = str(update.effective_user.id)
-        if user_id not in ADMIN_IDS:
-            return
-            
-        if await self.save_content(user_id):
-            await update.message.reply_text(
-                "محتوا با موفقیت ذخیره شد.",
-                reply_markup=self.get_main_menu_keyboard()
-            )
-            # پاک کردن محتوای موقت
-            del self.temp_content[user_id]
-            if user_id in self.admin_state:
-                del self.admin_state[user_id]
-        else:
-            await update.message.reply_text(
-                "متأسفانه در ذخیره محتوا مشکلی پیش آمد. لطفاً دوباره تلاش کنید.",
-                reply_markup=self.get_main_menu_keyboard()
-            )
-
     async def handle_template(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle template section"""
         if not await self.check_access(update, "template"):
@@ -257,8 +238,8 @@ class MillionishoBot:
         """Handle text template section"""
         user_id = str(update.effective_user.id)
         if not await self.check_access(update, "text_template"):
-            return
-            
+        return
+
         user_manager.set_current_section(user_id, "text_template")
         index = user_manager.get_current_index(user_id, "text_template")
         await self.send_content(update, "text_template", index)
@@ -266,7 +247,7 @@ class MillionishoBot:
 
     async def handle_image_template(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle image template section"""
-        user_id = str(update.effective_user.id)
+    user_id = str(update.effective_user.id)
         if not await self.check_access(update, "image_template"):
             return
             
@@ -297,9 +278,9 @@ class MillionishoBot:
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
             else:
-                await update.callback_query.message.edit_text(
+        await update.callback_query.message.edit_text(
                     tutorial.text,
-                    reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=InlineKeyboardMarkup(keyboard),
                     parse_mode=ParseMode.HTML
                 )
         else:
@@ -364,7 +345,7 @@ class MillionishoBot:
 
     async def handle_caption(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle caption section"""
-        user_id = str(update.effective_user.id)
+    user_id = str(update.effective_user.id)
         if not await self.check_access(update, "caption"):
             return
             
@@ -375,7 +356,7 @@ class MillionishoBot:
 
     async def handle_complete_idea(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle complete idea section"""
-        user_id = str(update.effective_user.id)
+    user_id = str(update.effective_user.id)
         if not await self.check_access(update, "complete_idea"):
             return
             
@@ -423,8 +404,8 @@ class MillionishoBot:
     async def handle_all_files(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle all files download section"""
         if not await self.check_access(update, "all_files"):
-            return
-            
+        return
+
         zip_path = content_manager.get_all_content_zip()
         if zip_path:
             await update.callback_query.message.reply_document(
@@ -461,10 +442,10 @@ class MillionishoBot:
 
     async def handle_favorites(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle favorites section"""
-        user_id = str(update.effective_user.id)
+    user_id = str(update.effective_user.id)
         if not await self.check_access(update, "favorites"):
-            return
-            
+        return
+    
         favorites = user_manager.get_favorites(user_id)
         if not favorites:
             await update.callback_query.message.edit_text(
@@ -495,7 +476,7 @@ class MillionishoBot:
         """Handle activation code entry"""
         await update.callback_query.message.edit_text(
             "لطفاً کد فعال‌سازی خود را وارد کنید:",
-            reply_markup=InlineKeyboardMarkup([[
+                reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton(NAVIGATION_BUTTONS["back_to_main"], callback_data="main_menu")
             ]])
         )
@@ -537,7 +518,7 @@ class MillionishoBot:
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
             return
-
+            
         # پردازش ورودی‌های پنل مدیریت
         if user_id in self.admin_state:
             action, section = self.admin_state[user_id]
@@ -722,6 +703,72 @@ class MillionishoBot:
                 ]])
             )
 
+    async def handle_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle photo upload"""
+        user_id = str(update.effective_user.id)
+        if user_id not in ADMIN_IDS or user_id not in self.temp_content:
+            return
+
+        photo = update.message.photo[-1]
+        file_id = photo.file_id
+        
+        self.temp_content[user_id]["media_type"] = "photo"
+        self.temp_content[user_id]["media_path"] = file_id
+        await update.message.reply_text(
+            "تصویر ذخیره شد. برای ذخیره نهایی /save را بزنید."
+        )
+
+    async def handle_video(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle video upload"""
+        user_id = str(update.effective_user.id)
+        if user_id not in ADMIN_IDS or user_id not in self.temp_content:
+            return
+
+        video = update.message.video
+        file_id = video.file_id
+        
+        self.temp_content[user_id]["media_type"] = "video"
+        self.temp_content[user_id]["media_path"] = file_id
+        await update.message.reply_text(
+            "ویدیو ذخیره شد. برای ذخیره نهایی /save را بزنید."
+        )
+
+    async def handle_document(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle document upload"""
+        user_id = str(update.effective_user.id)
+        if user_id not in ADMIN_IDS or user_id not in self.temp_content:
+            return
+
+        document = update.message.document
+        file_id = document.file_id
+        
+        self.temp_content[user_id]["media_type"] = "document"
+        self.temp_content[user_id]["media_path"] = file_id
+        await update.message.reply_text(
+            "فایل ذخیره شد. برای ذخیره نهایی /save را بزنید."
+        )
+
+    async def save_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /save command for admin content"""
+        user_id = str(update.effective_user.id)
+        if user_id not in ADMIN_IDS:
+            return
+            
+        if await self.save_content(user_id):
+            await update.message.reply_text(
+                "محتوا با موفقیت ذخیره شد.",
+                reply_markup=self.get_main_menu_keyboard()
+            )
+            # پاک کردن محتوای موقت
+            del self.temp_content[user_id]
+            if user_id in self.admin_state:
+                del self.admin_state[user_id]
+        else:
+            await update.message.reply_text(
+                "متأسفانه در ذخیره محتوا مشکلی پیش آمد. لطفاً دوباره تلاش کنید.",
+                reply_markup=self.get_main_menu_keyboard()
+            )
+
     async def save_media_file(self, file_id: str, section: str, media_type: str) -> str:
         """Save media file to appropriate directory"""
         file = await self.application.bot.get_file(file_id)
@@ -812,8 +859,8 @@ class MillionishoBot:
                 json.dump(content, f, ensure_ascii=False, indent=4)
                 
             return True
-            
-        except Exception as e:
+        
+    except Exception as e:
             logger.error(f"Error editing content: {e}")
             return False
 
