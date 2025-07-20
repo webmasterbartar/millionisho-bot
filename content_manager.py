@@ -87,5 +87,44 @@ class ContentManager:
         zip_path = os.path.join(self.content_dir, "all_content.zip")
         return zip_path if os.path.exists(zip_path) else None
 
+    def add_content(self, section: str, content_data: Dict) -> None:
+        """Add new content to a section"""
+        if section not in self.content:
+            self.content[section] = {}
+            
+        # Generate a new unique ID
+        new_id = str(len(self.content[section]) + 1)
+        while new_id in self.content[section]:
+            new_id = str(int(new_id) + 1)
+            
+        # Create new content object
+        new_content = Content(
+            id=new_id,
+            type=section,
+            text=content_data["text"],
+            media_path=content_data.get("media_path"),
+            media_type=content_data.get("media_type"),
+            additional_info=content_data.get("additional_info")
+        )
+        
+        # Add to memory
+        self.content[section][new_id] = new_content
+        
+        # Save to file
+        file_path = os.path.join(self.content_dir, f"{section}.json")
+        content_list = [
+            {
+                "id": content.id,
+                "text": content.text,
+                "media_path": content.media_path,
+                "media_type": content.media_type,
+                "additional_info": content.additional_info
+            }
+            for content in self.content[section].values()
+        ]
+        
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(content_list, f, ensure_ascii=False, indent=4)
+
 # Global instance
 content_manager = ContentManager() 

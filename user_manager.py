@@ -81,5 +81,14 @@ class UserManager:
         self.init_user(user_id)
         self.users[user_id]["last_activity"] = datetime.now()
 
+    def activate_vip(self, user_id: str, activation_code: str) -> bool:
+        """Activate VIP status using activation code"""
+        # TODO: Implement proper activation code validation
+        # For now, accept any non-empty code
+        if activation_code.strip():
+            self.set_vip(user_id, True)
+            return True
+        return False
+
 # Global instance
 user_manager = UserManager() 

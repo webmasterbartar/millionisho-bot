@@ -275,7 +275,7 @@ class MillionishoBot:
                     tutorial.text,
                     reply_markup=InlineKeyboardMarkup(keyboard),
                     parse_mode=ParseMode.HTML
-            )
+                )
         else:
             await update.callback_query.answer("محتوای آموزشی در دسترس نیست", show_alert=True)
 
@@ -464,3 +464,156 @@ class MillionishoBot:
             ]]),
             parse_mode=ParseMode.HTML
         ) 
+
+    async def save_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /save command - saves admin content"""
+        user_id = str(update.effective_user.id)
+        if user_id not in ADMIN_IDS:
+            await update.message.reply_text("این دستور فقط برای ادمین‌ها در دسترس است.")
+            return
+            
+        if not self.temp_content.get(user_id):
+            await update.message.reply_text("محتوایی برای ذخیره وجود ندارد.")
+            return
+            
+        content = self.temp_content[user_id]
+        section = self.current_section.get(user_id)
+        if not section:
+            await update.message.reply_text("لطفاً ابتدا بخش مورد نظر را انتخاب کنید.")
+            return
+            
+        content_manager.add_content(section, content)
+        self.temp_content.pop(user_id)
+        await update.message.reply_text("محتوا با موفقیت ذخیره شد.")
+
+    async def handle_activation_code(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle activation code entry"""
+        user_id = str(update.effective_user.id)
+        self.current_action[user_id] = "activate_code"
+        await update.callback_query.message.edit_text(
+            "لطفاً کد فعال‌سازی خود را وارد کنید:",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(NAVIGATION_BUTTONS["back_to_main"], callback_data="main_menu")
+            ]])
+        )
+
+    async def handle_activation_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle activation code input"""
+        user_id = str(update.effective_user.id)
+        if self.current_action.get(user_id) != "activate_code":
+            return
+            
+        activation_code = update.message.text.strip()
+        if user_manager.activate_vip(user_id, activation_code):
+            await update.message.reply_text(
+                "تبریک! اشتراک VIP شما با موفقیت فعال شد.",
+                reply_markup=self.get_main_menu_keyboard()
+            )
+        else:
+            await update.message.reply_text(
+                "کد فعال‌سازی نامعتبر است. لطفاً مجدداً تلاش کنید.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton(NAVIGATION_BUTTONS["back_to_main"], callback_data="main_menu")
+                ]])
+            )
+        self.current_action.pop(user_id)
+
+    async def handle_admin_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle admin panel callbacks"""
+        user_id = str(update.effective_user.id)
+        if user_id not in ADMIN_IDS:
+            await update.callback_query.answer("شما دسترسی به پنل ادمین ندارید.", show_alert=True)
+            return
+            
+        callback_data = update.callback_query.data
+        if callback_data == "admin_add_content":
+            self.admin_state[user_id] = "waiting_for_section"
+            sections = list(CONTENT_COUNTS.keys())
+            keyboard = []
+            for section in sections:
+                keyboard.append([InlineKeyboardButton(section, callback_data=f"admin_section_{section}")])
+            keyboard.append([InlineKeyboardButton("بازگشت", callback_data="main_menu")])
+            await update.callback_query.message.edit_text(
+                "لطفاً بخش مورد نظر را انتخاب کنید:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+
+    async def handle_text_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle text input for admin content addition"""
+        user_id = str(update.effective_user.id)
+        if user_id not in ADMIN_IDS or user_id not in self.admin_state:
+            return
+            
+        state = self.admin_state[user_id]
+        if state == "waiting_for_content":
+            self.temp_content[user_id] = {"text": update.message.text}
+            await update.message.reply_text(
+                "محتوا دریافت شد. آیا می‌خواهید رسانه‌ای اضافه کنید؟",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("بله", callback_data="admin_add_media")],
+                    [InlineKeyboardButton("خیر، ذخیره شود", callback_data="admin_save_content")],
+                    [InlineKeyboardButton("انصراف", callback_data="main_menu")]
+                ])
+            )
+            self.admin_state[user_id] = "waiting_for_media_choice"
+
+    async def handle_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle photo upload for admin content"""
+        user_id = str(update.effective_user.id)
+        if user_id not in ADMIN_IDS or user_id not in self.admin_state:
+            return
+            
+        if self.admin_state[user_id] == "waiting_for_media":
+            photo = update.message.photo[-1]
+            file_id = photo.file_id
+            self.temp_content[user_id]["media_type"] = "photo"
+            self.temp_content[user_id]["media_path"] = file_id
+            await update.message.reply_text(
+                "عکس دریافت شد. برای ذخیره محتوا از دستور /save استفاده کنید."
+            )
+
+    async def handle_video(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle video upload for admin content"""
+        user_id = str(update.effective_user.id)
+        if user_id not in ADMIN_IDS or user_id not in self.admin_state:
+            return
+            
+        if self.admin_state[user_id] == "waiting_for_media":
+            video = update.message.video
+            file_id = video.file_id
+            self.temp_content[user_id]["media_type"] = "video"
+            self.temp_content[user_id]["media_path"] = file_id
+            await update.message.reply_text(
+                "ویدیو دریافت شد. برای ذخیره محتوا از دستور /save استفاده کنید."
+            )
+
+    async def handle_document(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle document upload for admin content"""
+        user_id = str(update.effective_user.id)
+        if user_id not in ADMIN_IDS or user_id not in self.admin_state:
+            return
+            
+        if self.admin_state[user_id] == "waiting_for_media":
+            document = update.message.document
+            file_id = document.file_id
+            self.temp_content[user_id]["media_type"] = "document"
+            self.temp_content[user_id]["media_path"] = file_id
+            await update.message.reply_text(
+                "فایل دریافت شد. برای ذخیره محتوا از دستور /save استفاده کنید."
+            )
+
+    async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle errors"""
+        logger.error(f"Error occurred: {context.error}")
+        try:
+            if update and update.effective_message:
+                await update.effective_message.reply_text(
+                    "متأسفانه خطایی رخ داد. لطفاً مجدداً تلاش کنید."
+                )
+        except Exception as e:
+            logger.error(f"Error in error handler: {e}")
+
+if __name__ == "__main__":
+    # Create and run bot
+    bot = MillionishoBot()
+    bot.run() 
