@@ -524,7 +524,15 @@ class MillionishoBot:
     async def handle_admin_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle !admin command"""
         user_id = str(update.effective_user.id)
+        logger.info(f"Admin command received from user {user_id}")
+        
+        # Clear any existing state
+        self.admin_state.pop(user_id, None)
+        self.current_section.pop(user_id, None)
+        self.temp_content.pop(user_id, None)
+        
         if str(user_id) not in [str(admin_id) for admin_id in ADMIN_IDS]:
+            logger.warning(f"Unauthorized admin access attempt from user {user_id}")
             await update.message.reply_text("شما دسترسی به پنل ادمین ندارید.")
             return
             
@@ -538,17 +546,27 @@ class MillionishoBot:
             "به پنل مدیریت خوش آمدید. لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
+        logger.info(f"Admin panel opened for user {user_id}")
 
     async def handle_admin_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle admin panel callbacks"""
         user_id = str(update.effective_user.id)
+        logger.info(f"Admin callback received from user {user_id}")
+        
         if str(user_id) not in [str(admin_id) for admin_id in ADMIN_IDS]:
+            logger.warning(f"Unauthorized admin callback from user {user_id}")
             await update.callback_query.answer("شما دسترسی به پنل ادمین ندارید.", show_alert=True)
             return
             
         callback_data = update.callback_query.data
+        logger.info(f"Callback data: {callback_data}")
         
         if callback_data == "admin_add_content":
+            # Clear any existing state
+            self.admin_state.pop(user_id, None)
+            self.current_section.pop(user_id, None)
+            self.temp_content.pop(user_id, None)
+            
             self.admin_state[user_id] = "waiting_for_section"
             sections = list(CONTENT_COUNTS.keys())
             keyboard = []
@@ -559,6 +577,7 @@ class MillionishoBot:
                 "لطفاً بخش مورد نظر را انتخاب کنید:",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
+            logger.info(f"Content sections shown to user {user_id}")
             
         elif callback_data == "admin_stats":
             # Get statistics for each section
@@ -578,11 +597,13 @@ class MillionishoBot:
                 stats,
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
+            logger.info(f"Stats shown to user {user_id}")
             
         elif callback_data.startswith("admin_section_"):
             section = callback_data.replace("admin_section_", "")
             self.current_section[user_id] = section
             self.admin_state[user_id] = "waiting_for_content"
+            logger.info(f"Section {section} selected by user {user_id}")
             
             await update.callback_query.message.edit_text(
                 f"لطفاً محتوای جدید برای بخش {section} را ارسال کنید.\n"
@@ -594,6 +615,7 @@ class MillionishoBot:
             
         elif callback_data == "admin_add_media":
             self.admin_state[user_id] = "waiting_for_media"
+            logger.info(f"Waiting for media from user {user_id}")
             await update.callback_query.message.edit_text(
                 "لطفاً رسانه مورد نظر (عکس/ویدیو/فایل) را ارسال کنید.",
                 reply_markup=InlineKeyboardMarkup([[
@@ -603,15 +625,18 @@ class MillionishoBot:
             
         elif callback_data == "admin_save_content":
             if user_id not in self.temp_content:
+                logger.warning(f"No content to save for user {user_id}")
                 await update.callback_query.answer("خطا: محتوایی برای ذخیره وجود ندارد.", show_alert=True)
                 return
                 
             section = self.current_section.get(user_id)
             if not section:
+                logger.warning(f"No section selected for user {user_id}")
                 await update.callback_query.answer("خطا: بخش مورد نظر یافت نشد.", show_alert=True)
                 return
                 
             content = self.temp_content[user_id]
+            logger.info(f"Saving content for user {user_id} in section {section}: {content}")
             content_manager.add_content(section, content)
             
             # پاکسازی وضعیت
@@ -625,8 +650,14 @@ class MillionishoBot:
                     InlineKeyboardButton("بازگشت به پنل ادمین", callback_data="admin_back")
                 ]])
             )
+            logger.info(f"Content saved successfully for user {user_id}")
             
         elif callback_data == "admin_back":
+            # پاکسازی وضعیت
+            self.temp_content.pop(user_id, None)
+            self.current_section.pop(user_id, None)
+            self.admin_state.pop(user_id, None)
+            
             keyboard = [
                 [InlineKeyboardButton("افزودن محتوا", callback_data="admin_add_content")],
                 [InlineKeyboardButton("مشاهده آمار", callback_data="admin_stats")],
@@ -636,10 +667,7 @@ class MillionishoBot:
                 "به پنل مدیریت خوش آمدید. لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
-            if user_id in self.admin_state:
-                del self.admin_state[user_id]
-            if user_id in self.current_section:
-                del self.current_section[user_id]
+            logger.info(f"User {user_id} returned to admin panel")
 
     async def handle_text_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle text input for admin content addition"""
