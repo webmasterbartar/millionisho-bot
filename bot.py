@@ -89,7 +89,7 @@ class MillionishoBot:
         # Media handlers
         self.application.add_handler(MessageHandler(filters.PHOTO, self.handle_photo))
         self.application.add_handler(MessageHandler(filters.VIDEO, self.handle_video))
-        self.application.add_handler(MessageHandler(filters.DOCUMENT, self.handle_document))
+        self.application.add_handler(MessageHandler(filters.Document.ALL, self.handle_document))
         
         # Error handler
         self.application.add_error_handler(self.error_handler)
