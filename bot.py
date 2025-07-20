@@ -672,10 +672,21 @@ class MillionishoBot:
     async def handle_text_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle text input for admin content addition"""
         user_id = str(update.effective_user.id)
-        logger.info(f"Text received from user {user_id}")
+        logger.info(f"Text received from user {user_id}: {update.message.text}")
         
-        if str(user_id) not in [str(admin_id) for admin_id in ADMIN_IDS] or user_id not in self.admin_state:
+        # اگر پیام !admin باشد، آن را پردازش کن
+        if update.message.text == "!admin":
+            await self.handle_admin_command(update, context)
+            return
+        
+        # چک کردن دسترسی ادمین
+        if str(user_id) not in [str(admin_id) for admin_id in ADMIN_IDS]:
             logger.warning(f"Unauthorized text input attempt from user {user_id}")
+            return
+            
+        # اگر کاربر در حالت ادمین نیست، پیام را نادیده بگیر
+        if user_id not in self.admin_state:
+            logger.info(f"Text received but user {user_id} is not in admin mode")
             return
             
         state = self.admin_state[user_id]
@@ -684,15 +695,21 @@ class MillionishoBot:
         if state == "waiting_for_content":
             section = self.current_section.get(user_id)
             if not section:
-                await update.message.reply_text("خطا: بخش مورد نظر یافت نشد. لطفاً دوباره از منوی ادمین شروع کنید.")
+                await update.message.reply_text(
+                    "خطا: بخش مورد نظر یافت نشد. لطفاً دوباره از منوی ادمین شروع کنید.",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("بازگشت به منوی ادمین", callback_data="admin_back")
+                    ]])
+                )
                 return
 
             if user_id not in self.temp_content:
                 self.temp_content[user_id] = {}
             
             self.temp_content[user_id]["text"] = update.message.text
+            logger.info(f"Stored text content for user {user_id}: {update.message.text}")
             
-            # If we already have media, show save option
+            # اگر قبلاً رسانه داریم
             if "media_type" in self.temp_content[user_id] and "media_path" in self.temp_content[user_id]:
                 keyboard = [
                     [InlineKeyboardButton("ذخیره", callback_data="admin_save_content")],
@@ -707,7 +724,7 @@ class MillionishoBot:
                 )
                 self.admin_state[user_id] = "waiting_for_save_confirmation"
             else:
-                # Ask if they want to add media
+                # پرسیدن درباره اضافه کردن رسانه
                 keyboard = [
                     [InlineKeyboardButton("بله، می‌خواهم رسانه اضافه کنم", callback_data="admin_add_media")],
                     [InlineKeyboardButton("خیر، همین متن ذخیره شود", callback_data="admin_save_content")],
@@ -720,7 +737,15 @@ class MillionishoBot:
                 )
                 self.admin_state[user_id] = "waiting_for_media_choice"
             
-            logger.info(f"Text processed for user {user_id}, temp_content: {self.temp_content[user_id]}")
+            logger.info(f"Text processed for user {user_id}, new state: {self.admin_state[user_id]}")
+        else:
+            logger.warning(f"Text received in invalid state from user {user_id}")
+            await update.message.reply_text(
+                "لطفاً ابتدا از منوی ادمین، بخش مورد نظر را انتخاب کنید.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("بازگشت به منوی ادمین", callback_data="admin_back")
+                ]])
+            )
 
     async def handle_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle photo upload for admin content"""
