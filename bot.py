@@ -644,47 +644,112 @@ class MillionishoBot:
     async def handle_text_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle text input for admin content addition"""
         user_id = str(update.effective_user.id)
+        logger.info(f"Text received from user {user_id}")
+        
         if str(user_id) not in [str(admin_id) for admin_id in ADMIN_IDS] or user_id not in self.admin_state:
+            logger.warning(f"Unauthorized text input attempt from user {user_id}")
             return
             
         state = self.admin_state[user_id]
+        logger.info(f"User {user_id} state: {state}")
+        
         if state == "waiting_for_content":
             section = self.current_section.get(user_id)
             if not section:
                 await update.message.reply_text("خطا: بخش مورد نظر یافت نشد. لطفاً دوباره از منوی ادمین شروع کنید.")
                 return
 
-            self.temp_content[user_id] = {
-                "text": update.message.text,
-                "media_type": None,
-                "media_path": None
-            }
+            if user_id not in self.temp_content:
+                self.temp_content[user_id] = {}
             
-            keyboard = [
-                [InlineKeyboardButton("بله، می‌خواهم رسانه اضافه کنم", callback_data="admin_add_media")],
-                [InlineKeyboardButton("خیر، همین متن ذخیره شود", callback_data="admin_save_content")],
-                [InlineKeyboardButton("انصراف", callback_data="admin_back")]
-            ]
+            self.temp_content[user_id]["text"] = update.message.text
             
-            await update.message.reply_text(
-                f"متن دریافت شد:\n\n{update.message.text}\n\nآیا می‌خواهید رسانه‌ای (عکس/ویدیو/فایل) هم اضافه کنید؟",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            self.admin_state[user_id] = "waiting_for_media_choice"
+            # If we already have media, show save option
+            if "media_type" in self.temp_content[user_id] and "media_path" in self.temp_content[user_id]:
+                keyboard = [
+                    [InlineKeyboardButton("ذخیره", callback_data="admin_save_content")],
+                    [InlineKeyboardButton("انصراف", callback_data="admin_back")]
+                ]
+                await update.message.reply_text(
+                    f"محتوای کامل:\n\n"
+                    f"📝 متن: {self.temp_content[user_id]['text']}\n"
+                    f"🖼 رسانه: دریافت شد\n\n"
+                    "آیا می‌خواهید این محتوا ذخیره شود؟",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                self.admin_state[user_id] = "waiting_for_save_confirmation"
+            else:
+                # Ask if they want to add media
+                keyboard = [
+                    [InlineKeyboardButton("بله، می‌خواهم رسانه اضافه کنم", callback_data="admin_add_media")],
+                    [InlineKeyboardButton("خیر، همین متن ذخیره شود", callback_data="admin_save_content")],
+                    [InlineKeyboardButton("انصراف", callback_data="admin_back")]
+                ]
+                
+                await update.message.reply_text(
+                    f"متن دریافت شد:\n\n{update.message.text}\n\nآیا می‌خواهید رسانه‌ای (عکس/ویدیو/فایل) هم اضافه کنید؟",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                self.admin_state[user_id] = "waiting_for_media_choice"
+            
+            logger.info(f"Text processed for user {user_id}, temp_content: {self.temp_content[user_id]}")
 
     async def handle_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle photo upload for admin content"""
         user_id = str(update.effective_user.id)
+        logger.info(f"Photo received from user {user_id}")
+        
         if str(user_id) not in [str(admin_id) for admin_id in ADMIN_IDS] or user_id not in self.admin_state:
+            logger.warning(f"Unauthorized photo upload attempt from user {user_id}")
             return
             
-        if self.admin_state[user_id] == "waiting_for_media":
-            photo = update.message.photo[-1]
+        state = self.admin_state.get(user_id)
+        logger.info(f"User {user_id} state: {state}")
+        
+        if state in ["waiting_for_media", "waiting_for_content"]:
+            photo = update.message.photo[-1]  # Get the largest photo size
             file_id = photo.file_id
-            self.temp_content[user_id]["media_type"] = "photo"
-            self.temp_content[user_id]["media_path"] = file_id
+            
+            if user_id not in self.temp_content:
+                self.temp_content[user_id] = {}
+            
+            self.temp_content[user_id].update({
+                "media_type": "photo",
+                "media_path": file_id
+            })
+            
+            # If we don't have text content yet, wait for it
+            if "text" not in self.temp_content[user_id]:
+                await update.message.reply_text(
+                    "عکس دریافت شد. حالا لطفاً متن مربوط به این محتوا را ارسال کنید:",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("انصراف", callback_data="admin_back")
+                    ]])
+                )
+                self.admin_state[user_id] = "waiting_for_content"
+            else:
+                # We have both text and photo, show save option
+                keyboard = [
+                    [InlineKeyboardButton("ذخیره", callback_data="admin_save_content")],
+                    [InlineKeyboardButton("انصراف", callback_data="admin_back")]
+                ]
+                await update.message.reply_text(
+                    f"عکس دریافت شد. محتوای کامل:\n\n"
+                    f"📝 متن: {self.temp_content[user_id]['text']}\n"
+                    f"🖼 عکس: دریافت شد\n\n"
+                    "آیا می‌خواهید این محتوا ذخیره شود؟",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                self.admin_state[user_id] = "waiting_for_save_confirmation"
+            
+            logger.info(f"Photo processed for user {user_id}, temp_content: {self.temp_content[user_id]}")
+        else:
+            logger.warning(f"Photo received in invalid state from user {user_id}")
             await update.message.reply_text(
-                "عکس دریافت شد. برای ذخیره محتوا از دستور /save استفاده کنید."
+                "لطفاً ابتدا از منوی ادمین، بخش مورد نظر را انتخاب کنید.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("بازگشت به منوی ادمین", callback_data="admin_back")
+                ]])
             )
 
     async def handle_video(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
