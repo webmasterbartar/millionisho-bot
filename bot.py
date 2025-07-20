@@ -592,6 +592,40 @@ class MillionishoBot:
                 ]])
             )
             
+        elif callback_data == "admin_add_media":
+            self.admin_state[user_id] = "waiting_for_media"
+            await update.callback_query.message.edit_text(
+                "لطفاً رسانه مورد نظر (عکس/ویدیو/فایل) را ارسال کنید.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("انصراف", callback_data="admin_back")
+                ]])
+            )
+            
+        elif callback_data == "admin_save_content":
+            if user_id not in self.temp_content:
+                await update.callback_query.answer("خطا: محتوایی برای ذخیره وجود ندارد.", show_alert=True)
+                return
+                
+            section = self.current_section.get(user_id)
+            if not section:
+                await update.callback_query.answer("خطا: بخش مورد نظر یافت نشد.", show_alert=True)
+                return
+                
+            content = self.temp_content[user_id]
+            content_manager.add_content(section, content)
+            
+            # پاکسازی وضعیت
+            self.temp_content.pop(user_id, None)
+            self.current_section.pop(user_id, None)
+            self.admin_state.pop(user_id, None)
+            
+            await update.callback_query.message.edit_text(
+                "✅ محتوا با موفقیت ذخیره شد.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("بازگشت به پنل ادمین", callback_data="admin_back")
+                ]])
+            )
+            
         elif callback_data == "admin_back":
             keyboard = [
                 [InlineKeyboardButton("افزودن محتوا", callback_data="admin_add_content")],
@@ -615,14 +649,26 @@ class MillionishoBot:
             
         state = self.admin_state[user_id]
         if state == "waiting_for_content":
-            self.temp_content[user_id] = {"text": update.message.text}
+            section = self.current_section.get(user_id)
+            if not section:
+                await update.message.reply_text("خطا: بخش مورد نظر یافت نشد. لطفاً دوباره از منوی ادمین شروع کنید.")
+                return
+
+            self.temp_content[user_id] = {
+                "text": update.message.text,
+                "media_type": None,
+                "media_path": None
+            }
+            
+            keyboard = [
+                [InlineKeyboardButton("بله، می‌خواهم رسانه اضافه کنم", callback_data="admin_add_media")],
+                [InlineKeyboardButton("خیر، همین متن ذخیره شود", callback_data="admin_save_content")],
+                [InlineKeyboardButton("انصراف", callback_data="admin_back")]
+            ]
+            
             await update.message.reply_text(
-                "محتوا دریافت شد. آیا می‌خواهید رسانه‌ای اضافه کنید؟",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("بله", callback_data="admin_add_media")],
-                    [InlineKeyboardButton("خیر، ذخیره شود", callback_data="admin_save_content")],
-                    [InlineKeyboardButton("انصراف", callback_data="main_menu")]
-                ])
+                f"متن دریافت شد:\n\n{update.message.text}\n\nآیا می‌خواهید رسانه‌ای (عکس/ویدیو/فایل) هم اضافه کنید؟",
+                reply_markup=InlineKeyboardMarkup(keyboard)
             )
             self.admin_state[user_id] = "waiting_for_media_choice"
 
