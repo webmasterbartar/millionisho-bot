@@ -471,7 +471,7 @@ class MillionishoBot:
     async def save_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /save command - saves admin content"""
         user_id = str(update.effective_user.id)
-        if user_id not in ADMIN_IDS:
+        if str(user_id) not in [str(admin_id) for admin_id in ADMIN_IDS]:
             await update.message.reply_text("این دستور فقط برای ادمین‌ها در دسترس است.")
             return
             
@@ -524,7 +524,7 @@ class MillionishoBot:
     async def handle_admin_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle !admin command"""
         user_id = str(update.effective_user.id)
-        if user_id not in ADMIN_IDS:
+        if str(user_id) not in [str(admin_id) for admin_id in ADMIN_IDS]:
             await update.message.reply_text("شما دسترسی به پنل ادمین ندارید.")
             return
             
@@ -542,7 +542,7 @@ class MillionishoBot:
     async def handle_admin_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle admin panel callbacks"""
         user_id = str(update.effective_user.id)
-        if user_id not in ADMIN_IDS:
+        if str(user_id) not in [str(admin_id) for admin_id in ADMIN_IDS]:
             await update.callback_query.answer("شما دسترسی به پنل ادمین ندارید.", show_alert=True)
             return
             
@@ -610,7 +610,7 @@ class MillionishoBot:
     async def handle_text_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle text input for admin content addition"""
         user_id = str(update.effective_user.id)
-        if user_id not in ADMIN_IDS or user_id not in self.admin_state:
+        if str(user_id) not in [str(admin_id) for admin_id in ADMIN_IDS] or user_id not in self.admin_state:
             return
             
         state = self.admin_state[user_id]
@@ -629,7 +629,7 @@ class MillionishoBot:
     async def handle_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle photo upload for admin content"""
         user_id = str(update.effective_user.id)
-        if user_id not in ADMIN_IDS or user_id not in self.admin_state:
+        if str(user_id) not in [str(admin_id) for admin_id in ADMIN_IDS] or user_id not in self.admin_state:
             return
             
         if self.admin_state[user_id] == "waiting_for_media":
@@ -644,7 +644,7 @@ class MillionishoBot:
     async def handle_video(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle video upload for admin content"""
         user_id = str(update.effective_user.id)
-        if user_id not in ADMIN_IDS or user_id not in self.admin_state:
+        if str(user_id) not in [str(admin_id) for admin_id in ADMIN_IDS] or user_id not in self.admin_state:
             return
             
         if self.admin_state[user_id] == "waiting_for_media":
@@ -659,7 +659,7 @@ class MillionishoBot:
     async def handle_document(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle document upload for admin content"""
         user_id = str(update.effective_user.id)
-        if user_id not in ADMIN_IDS or user_id not in self.admin_state:
+        if str(user_id) not in [str(admin_id) for admin_id in ADMIN_IDS] or user_id not in self.admin_state:
             return
             
         if self.admin_state[user_id] == "waiting_for_media":
