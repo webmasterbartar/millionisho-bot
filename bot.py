@@ -55,6 +55,9 @@ class MillionishoBot:
         self.application.add_handler(CommandHandler("help", self.help_command))
         self.application.add_handler(CommandHandler("save", self.save_command))
         
+        # Admin command handler
+        self.application.add_handler(MessageHandler(filters.Regex("^!admin$"), self.handle_admin_command))
+        
         # Callback handlers for main menu
         self.application.add_handler(CallbackQueryHandler(self.handle_template, pattern="^template$"))
         self.application.add_handler(CallbackQueryHandler(self.handle_reels_idea, pattern="^reels_idea$"))
@@ -518,6 +521,24 @@ class MillionishoBot:
             )
         self.current_action.pop(user_id)
 
+    async def handle_admin_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle !admin command"""
+        user_id = str(update.effective_user.id)
+        if user_id not in ADMIN_IDS:
+            await update.message.reply_text("شما دسترسی به پنل ادمین ندارید.")
+            return
+            
+        keyboard = [
+            [InlineKeyboardButton("افزودن محتوا", callback_data="admin_add_content")],
+            [InlineKeyboardButton("مشاهده آمار", callback_data="admin_stats")],
+            [InlineKeyboardButton("بازگشت به منوی اصلی", callback_data="main_menu")]
+        ]
+        
+        await update.message.reply_text(
+            "به پنل مدیریت خوش آمدید. لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
     async def handle_admin_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle admin panel callbacks"""
         user_id = str(update.effective_user.id)
@@ -526,17 +547,65 @@ class MillionishoBot:
             return
             
         callback_data = update.callback_query.data
+        
         if callback_data == "admin_add_content":
             self.admin_state[user_id] = "waiting_for_section"
             sections = list(CONTENT_COUNTS.keys())
             keyboard = []
             for section in sections:
                 keyboard.append([InlineKeyboardButton(section, callback_data=f"admin_section_{section}")])
-            keyboard.append([InlineKeyboardButton("بازگشت", callback_data="main_menu")])
+            keyboard.append([InlineKeyboardButton("بازگشت", callback_data="admin_back")])
             await update.callback_query.message.edit_text(
                 "لطفاً بخش مورد نظر را انتخاب کنید:",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
+            
+        elif callback_data == "admin_stats":
+            # Get statistics for each section
+            stats = "📊 آمار استفاده از بخش‌های مختلف:\n\n"
+            total_users = len(user_manager.users)
+            vip_users = sum(1 for user in user_manager.users.values() if user.get("is_vip", False))
+            
+            stats += f"👥 تعداد کل کاربران: {total_users}\n"
+            stats += f"💎 تعداد کاربران VIP: {vip_users}\n\n"
+            stats += "📈 تعداد محتوا در هر بخش:\n"
+            
+            for section, count in CONTENT_COUNTS.items():
+                stats += f"- {section}: {count}\n"
+            
+            keyboard = [[InlineKeyboardButton("بازگشت", callback_data="admin_back")]]
+            await update.callback_query.message.edit_text(
+                stats,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            
+        elif callback_data.startswith("admin_section_"):
+            section = callback_data.replace("admin_section_", "")
+            self.current_section[user_id] = section
+            self.admin_state[user_id] = "waiting_for_content"
+            
+            await update.callback_query.message.edit_text(
+                f"لطفاً محتوای جدید برای بخش {section} را ارسال کنید.\n"
+                "می‌توانید متن، عکس، ویدیو یا فایل ارسال کنید.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("انصراف", callback_data="admin_back")
+                ]])
+            )
+            
+        elif callback_data == "admin_back":
+            keyboard = [
+                [InlineKeyboardButton("افزودن محتوا", callback_data="admin_add_content")],
+                [InlineKeyboardButton("مشاهده آمار", callback_data="admin_stats")],
+                [InlineKeyboardButton("بازگشت به منوی اصلی", callback_data="main_menu")]
+            ]
+            await update.callback_query.message.edit_text(
+                "به پنل مدیریت خوش آمدید. لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            if user_id in self.admin_state:
+                del self.admin_state[user_id]
+            if user_id in self.current_section:
+                del self.current_section[user_id]
 
     async def handle_text_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle text input for admin content addition"""
