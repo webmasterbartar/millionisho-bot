@@ -21,4 +21,4 @@ CACHE_TTL = int(os.getenv('CACHE_TTL', 3600))  # 1 hour
 CACHE_MAX_SIZE = int(os.getenv('CACHE_MAX_SIZE', 1000))
 
 # Debug Mode
-DEBUG = os.getenv('DEBUG', 'False').lower() == 'true' 
+DEBUG = True  # Set to True for detailed logging 

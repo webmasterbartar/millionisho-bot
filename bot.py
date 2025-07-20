@@ -16,7 +16,8 @@ from telegram.constants import ParseMode
 from config import (
     TELEGRAM_TOKEN,
     WORDPRESS_BASE_URL,
-    ADMIN_IDS
+    ADMIN_IDS,
+    DEBUG
 )
 from menu_config import (
     MAIN_MENU_BUTTONS,
@@ -30,117 +31,104 @@ from menu_config import (
 from user_manager import user_manager
 from content_manager import content_manager
 
-# Configure logging
+# Configure logging with more detail
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO,
+    level=logging.DEBUG if DEBUG else logging.INFO,
     filename='bot.log'
 )
 logger = logging.getLogger(__name__)
 
+# Add a console handler for immediate feedback
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.DEBUG if DEBUG else logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
+
 class MillionishoBot:
     def __init__(self):
         """Initialize bot with required handlers"""
+        logger.info("Initializing MillionishoBot")
         self.application = Application.builder().token(TELEGRAM_TOKEN).build()
         self.current_section = {}
         self.current_action = {}
         self.temp_content = {}
-        self.admin_state = {}  # برای نگهداری وضعیت ادمین‌ها
+        self.admin_state = {}
         self._setup_handlers()
         
     def _setup_handlers(self):
         """Setup all necessary command and callback handlers"""
+        logger.info("Setting up message handlers")
+        
         # Command handlers
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CommandHandler("help", self.help_command))
         self.application.add_handler(CommandHandler("save", self.save_command))
         
-        # Admin command handler
-        self.application.add_handler(MessageHandler(filters.Regex("^!admin$"), self.handle_admin_command))
+        # Text handler for admin command
+        self.application.add_handler(MessageHandler(
+            filters.TEXT & filters.Regex("^!admin$"),
+            self.handle_admin_command
+        ))
         
-        # Callback handlers for main menu
-        self.application.add_handler(CallbackQueryHandler(self.handle_template, pattern="^template$"))
-        self.application.add_handler(CallbackQueryHandler(self.handle_reels_idea, pattern="^reels_idea$"))
-        self.application.add_handler(CallbackQueryHandler(self.handle_call_to_action, pattern="^call_to_action$"))
-        self.application.add_handler(CallbackQueryHandler(self.handle_caption, pattern="^caption$"))
-        self.application.add_handler(CallbackQueryHandler(self.handle_complete_idea, pattern="^complete_idea$"))
-        self.application.add_handler(CallbackQueryHandler(self.handle_interactive_story, pattern="^interactive_story$"))
-        self.application.add_handler(CallbackQueryHandler(self.handle_bio, pattern="^bio$"))
-        self.application.add_handler(CallbackQueryHandler(self.handle_roadmap, pattern="^roadmap$"))
-        self.application.add_handler(CallbackQueryHandler(self.handle_all_files, pattern="^all_files$"))
-        self.application.add_handler(CallbackQueryHandler(self.handle_vip, pattern="^vip$"))
-        self.application.add_handler(CallbackQueryHandler(self.handle_favorites, pattern="^favorites$"))
-        
-        # Navigation handlers
-        self.application.add_handler(CallbackQueryHandler(self.handle_next, pattern="^next"))
-        self.application.add_handler(CallbackQueryHandler(self.handle_back, pattern="^back"))
-        self.application.add_handler(CallbackQueryHandler(self.handle_main_menu, pattern="^main_menu$"))
-        
-        # Template submenu handlers
-        self.application.add_handler(CallbackQueryHandler(self.handle_text_template, pattern="^text_template$"))
-        self.application.add_handler(CallbackQueryHandler(self.handle_image_template, pattern="^image_template$"))
-        self.application.add_handler(CallbackQueryHandler(self.handle_tutorial, pattern="^tutorial"))
-        
-        # VIP handlers
-        self.application.add_handler(CallbackQueryHandler(self.handle_activation_code, pattern="^activate_code$"))
-        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_activation_input))
-        
-        # Admin handlers
-        self.application.add_handler(CallbackQueryHandler(self.handle_admin_callback, pattern="^admin_"))
-        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text_input))
+        # General text handler
+        self.application.add_handler(MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            self.handle_text_input
+        ))
         
         # Media handlers
         self.application.add_handler(MessageHandler(filters.PHOTO, self.handle_photo))
         self.application.add_handler(MessageHandler(filters.VIDEO, self.handle_video))
         self.application.add_handler(MessageHandler(filters.Document.ALL, self.handle_document))
         
+        # Callback handlers
+        self.application.add_handler(CallbackQueryHandler(self.handle_callback))
+        
         # Error handler
         self.application.add_error_handler(self.error_handler)
-    
-    def run(self):
-        """Run the bot"""
-        self.application.run_polling()
+        
+        logger.info("All handlers have been set up")
 
-    def get_main_menu_keyboard(self) -> InlineKeyboardMarkup:
-        """Create main menu keyboard"""
-        keyboard = []
-        buttons = list(MAIN_MENU_BUTTONS.items())
-        
-        # Create rows of 2 buttons each
-        for i in range(0, len(buttons), 2):
-            row = []
-            for key, text in buttons[i:i+2]:
-                row.append(InlineKeyboardButton(text, callback_data=key))
-            keyboard.append(row)
-            
-        return InlineKeyboardMarkup(keyboard)
+    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Central callback handler"""
+        user_id = str(update.effective_user.id)
+        callback_data = update.callback_query.data
+        logger.debug(f"Callback received - user_id: {user_id}, data: {callback_data}")
 
-    def get_template_submenu_keyboard(self) -> InlineKeyboardMarkup:
-        """Create template submenu keyboard"""
-        keyboard = []
-        for key, text in TEMPLATE_SUBMENU_BUTTONS.items():
-            keyboard.append([InlineKeyboardButton(text, callback_data=key)])
-        return InlineKeyboardMarkup(keyboard)
+        # Admin callbacks
+        if callback_data.startswith("admin_"):
+            await self.handle_admin_callback(update, context)
+            return
 
-    def get_navigation_keyboard(self, show_tutorial: bool = True) -> InlineKeyboardMarkup:
-        """Create navigation keyboard"""
-        keyboard = []
-        nav_row = []
-        
-        if "back" in NAVIGATION_BUTTONS:
-            nav_row.append(InlineKeyboardButton(NAVIGATION_BUTTONS["back"], callback_data="back"))
-        if "next" in NAVIGATION_BUTTONS:
-            nav_row.append(InlineKeyboardButton(NAVIGATION_BUTTONS["next"], callback_data="next"))
-        
-        if nav_row:
-            keyboard.append(nav_row)
-            
-        if show_tutorial:
-            keyboard.append([InlineKeyboardButton("توضیحات و آموزش", callback_data="tutorial")])
-            
-        keyboard.append([InlineKeyboardButton(NAVIGATION_BUTTONS["back_to_main"], callback_data="main_menu")])
-        
-        return InlineKeyboardMarkup(keyboard) 
+        # Other callbacks based on the pattern
+        handlers = {
+            "^template$": self.handle_template,
+            "^text_template$": self.handle_text_template,
+            "^image_template$": self.handle_image_template,
+            "^tutorial": self.handle_tutorial,
+            "^next": self.handle_next,
+            "^back": self.handle_back,
+            "^main_menu$": self.handle_main_menu,
+            "^reels_idea$": self.handle_reels_idea,
+            "^call_to_action$": self.handle_call_to_action,
+            "^caption$": self.handle_caption,
+            "^complete_idea$": self.handle_complete_idea,
+            "^interactive_story$": self.handle_interactive_story,
+            "^bio$": self.handle_bio,
+            "^roadmap$": self.handle_roadmap,
+            "^all_files$": self.handle_all_files,
+            "^vip$": self.handle_vip,
+            "^favorites$": self.handle_favorites,
+        }
+
+        for pattern, handler in handlers.items():
+            if callback_data.startswith(pattern.strip("^")):
+                await handler(update, context)
+                return
+
+        logger.warning(f"Unhandled callback data: {callback_data}")
 
     async def check_access(self, update: Update, section: str) -> bool:
         """Check if user has access to the section"""
@@ -672,29 +660,26 @@ class MillionishoBot:
     async def handle_text_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle text input for admin content addition"""
         user_id = str(update.effective_user.id)
-        logger.info(f"Text received from user {user_id}: {update.message.text}")
-        
-        # اگر پیام !admin باشد، آن را پردازش کن
-        if update.message.text == "!admin":
-            await self.handle_admin_command(update, context)
-            return
-        
-        # چک کردن دسترسی ادمین
+        text = update.message.text
+        logger.debug(f"Text input received - user_id: {user_id}, text: {text}")
+
+        # Skip if not admin
         if str(user_id) not in [str(admin_id) for admin_id in ADMIN_IDS]:
-            logger.warning(f"Unauthorized text input attempt from user {user_id}")
+            logger.debug(f"Non-admin text input ignored - user_id: {user_id}")
             return
-            
-        # اگر کاربر در حالت ادمین نیست، پیام را نادیده بگیر
+
+        # Skip if not in admin mode
         if user_id not in self.admin_state:
-            logger.info(f"Text received but user {user_id} is not in admin mode")
+            logger.debug(f"Text input ignored (not in admin mode) - user_id: {user_id}")
             return
-            
+
         state = self.admin_state[user_id]
-        logger.info(f"User {user_id} state: {state}")
-        
+        logger.debug(f"Processing text input - user_id: {user_id}, state: {state}")
+
         if state == "waiting_for_content":
             section = self.current_section.get(user_id)
             if not section:
+                logger.warning(f"No section selected - user_id: {user_id}")
                 await update.message.reply_text(
                     "خطا: بخش مورد نظر یافت نشد. لطفاً دوباره از منوی ادمین شروع کنید.",
                     reply_markup=InlineKeyboardMarkup([[
@@ -703,49 +688,29 @@ class MillionishoBot:
                 )
                 return
 
+            # Store the text content
             if user_id not in self.temp_content:
                 self.temp_content[user_id] = {}
             
-            self.temp_content[user_id]["text"] = update.message.text
-            logger.info(f"Stored text content for user {user_id}: {update.message.text}")
-            
-            # اگر قبلاً رسانه داریم
-            if "media_type" in self.temp_content[user_id] and "media_path" in self.temp_content[user_id]:
-                keyboard = [
-                    [InlineKeyboardButton("ذخیره", callback_data="admin_save_content")],
-                    [InlineKeyboardButton("انصراف", callback_data="admin_back")]
-                ]
+            self.temp_content[user_id]["text"] = text
+            logger.debug(f"Text content stored - user_id: {user_id}, section: {section}")
+
+            # Show appropriate options
+            keyboard = [
+                [InlineKeyboardButton("بله، می‌خواهم رسانه اضافه کنم", callback_data="admin_add_media")],
+                [InlineKeyboardButton("خیر، همین متن ذخیره شود", callback_data="admin_save_content")],
+                [InlineKeyboardButton("انصراف", callback_data="admin_back")]
+            ]
+
+            try:
                 await update.message.reply_text(
-                    f"محتوای کامل:\n\n"
-                    f"📝 متن: {self.temp_content[user_id]['text']}\n"
-                    f"🖼 رسانه: دریافت شد\n\n"
-                    "آیا می‌خواهید این محتوا ذخیره شود؟",
+                    f"متن دریافت شد:\n\n{text}\n\nآیا می‌خواهید رسانه‌ای (عکس/ویدیو/فایل) هم اضافه کنید؟",
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
-                self.admin_state[user_id] = "waiting_for_save_confirmation"
-            else:
-                # پرسیدن درباره اضافه کردن رسانه
-                keyboard = [
-                    [InlineKeyboardButton("بله، می‌خواهم رسانه اضافه کنم", callback_data="admin_add_media")],
-                    [InlineKeyboardButton("خیر، همین متن ذخیره شود", callback_data="admin_save_content")],
-                    [InlineKeyboardButton("انصراف", callback_data="admin_back")]
-                ]
-                
-                await update.message.reply_text(
-                    f"متن دریافت شد:\n\n{update.message.text}\n\nآیا می‌خواهید رسانه‌ای (عکس/ویدیو/فایل) هم اضافه کنید؟",
-                    reply_markup=InlineKeyboardMarkup(keyboard)
-                )
-                self.admin_state[user_id] = "waiting_for_media_choice"
-            
-            logger.info(f"Text processed for user {user_id}, new state: {self.admin_state[user_id]}")
-        else:
-            logger.warning(f"Text received in invalid state from user {user_id}")
-            await update.message.reply_text(
-                "لطفاً ابتدا از منوی ادمین، بخش مورد نظر را انتخاب کنید.",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("بازگشت به منوی ادمین", callback_data="admin_back")
-                ]])
-            )
+                logger.debug(f"Options message sent - user_id: {user_id}")
+            except Exception as e:
+                logger.error(f"Error sending options message - user_id: {user_id}, error: {str(e)}")
+                await update.message.reply_text("خطا در ارسال پیام. لطفاً دوباره تلاش کنید.")
 
     async def handle_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle photo upload for admin content"""
