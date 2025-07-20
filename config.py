@@ -8,7 +8,7 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 
 # Admin IDs
-ADMIN_IDS = [1807336889]  # شناسه تلگرام ادمین
+ADMIN_IDS = [1807336889, 101913815]  # شناسه تلگرام ادمین‌ها: Arshia Aghayi و Sepehr
 
 # WordPress API Configuration
 WORDPRESS_BASE_URL = os.getenv('WORDPRESS_BASE_URL', 'https://millionisho.com')
