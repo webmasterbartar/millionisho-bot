@@ -869,6 +869,119 @@ class MillionishoBot:
         
         return InlineKeyboardMarkup(keyboard)
 
+    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /start command"""
+        user_id = str(update.effective_user.id)
+        logger.info(f"Start command received from user {user_id}")
+        
+        try:
+            user_manager.init_user(user_id)
+            await update.message.reply_text(
+                MESSAGES["welcome"],
+                reply_markup=self.get_main_menu_keyboard(),
+                parse_mode=ParseMode.HTML
+            )
+            logger.info(f"Welcome message sent to user {user_id}")
+        except Exception as e:
+            logger.error(f"Error in start_command - user: {user_id}, error: {str(e)}")
+            await update.message.reply_text("خطا در شروع ربات. لطفاً دوباره تلاش کنید.")
+
+    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /help command"""
+        user_id = str(update.effective_user.id)
+        logger.info(f"Help command received from user {user_id}")
+        
+        try:
+            await update.message.reply_text(
+                "لطفاً دستورات زیر را در اختیار دارید:\n\n"
+                "/start - شروع کردن با ربات\n"
+                "/help - دریافت دستورات\n"
+                "/save - ذخیره محتوای اضافه شده برای ادمین\n\n"
+                "برای دسترسی به پنل ادمین، دستور !admin را ارسال کنید.",
+                parse_mode=ParseMode.HTML
+            )
+            logger.info(f"Help message sent to user {user_id}")
+        except Exception as e:
+            logger.error(f"Error in help_command - user: {user_id}, error: {str(e)}")
+            await update.message.reply_text("خطا در نمایش راهنما. لطفاً دوباره تلاش کنید.")
+
+    async def handle_template(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle template section"""
+        user_id = str(update.effective_user.id)
+        logger.info(f"Template section accessed by user {user_id}")
+        
+        try:
+            if not await self.check_access(update, "template"):
+                logger.warning(f"Access denied to template section for user {user_id}")
+                return
+                
+            await update.callback_query.message.edit_text(
+                "لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
+                reply_markup=self.get_template_submenu_keyboard(),
+                parse_mode=ParseMode.HTML
+            )
+            logger.info(f"Template submenu displayed for user {user_id}")
+            
+        except Exception as e:
+            logger.error(f"Error in handle_template - user: {user_id}, error: {str(e)}")
+            await update.callback_query.answer("خطا در نمایش منو. لطفاً دوباره تلاش کنید.", show_alert=True)
+
+    async def handle_text_template(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle text template section"""
+        await self.handle_section_content(update, context, "text_template")
+        if await self.check_access(update, "text_template"):
+            user_manager.increment_usage(str(update.effective_user.id), "template")
+
+    async def handle_image_template(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle image template section"""
+        await self.handle_section_content(update, context, "image_template")
+        if await self.check_access(update, "image_template"):
+            user_manager.increment_usage(str(update.effective_user.id), "template")
+
+    async def handle_tutorial(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle tutorial section"""
+        user_id = str(update.effective_user.id)
+        logger.info(f"Tutorial section accessed by user {user_id}")
+        
+        try:
+            current_section = user_manager.get_current_section(user_id)
+            if not current_section:
+                logger.warning(f"No current section found for tutorial - user: {user_id}")
+                await update.callback_query.answer("لطفاً ابتدا یک بخش را انتخاب کنید.", show_alert=True)
+                return
+            
+            if not await self.check_access(update, "tutorial"):
+                logger.warning(f"Access denied to tutorial section for user {user_id}")
+                return
+                
+            tutorial = content_manager.get_tutorial(current_section)
+            if tutorial:
+                keyboard = [[
+                    InlineKeyboardButton(NAVIGATION_BUTTONS["back"], callback_data="back"),
+                    InlineKeyboardButton(NAVIGATION_BUTTONS["back_to_main"], callback_data="main_menu")
+                ]]
+                
+                if tutorial.media_path and tutorial.media_type == "document":
+                    await update.callback_query.message.reply_document(
+                        document=tutorial.media_path,
+                        caption=tutorial.text,
+                        reply_markup=InlineKeyboardMarkup(keyboard)
+                    )
+                else:
+                    await update.callback_query.message.edit_text(
+                        tutorial.text,
+                        reply_markup=InlineKeyboardMarkup(keyboard),
+                        parse_mode=ParseMode.HTML
+                    )
+                logger.info(f"Tutorial content sent for section {current_section} - user: {user_id}")
+            else:
+                logger.warning(f"No tutorial content found for section {current_section}")
+                await update.callback_query.answer("محتوای آموزشی در دسترس نیست", show_alert=True)
+                
+        except Exception as e:
+            logger.error(f"Error in handle_tutorial - user: {user_id}, error: {str(e)}")
+            await update.callback_query.answer("خطا در نمایش آموزش. لطفاً دوباره تلاش کنید.", show_alert=True)
+
 if __name__ == "__main__":
     # Create and run bot
     bot = MillionishoBot()
