@@ -362,13 +362,39 @@ class MillionishoBot:
     async def handle_bio(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle bio section"""
         user_id = str(update.effective_user.id)
-        if not await self.check_access(update, "bio"):
-            return
-    
-        user_manager.set_current_section(user_id, "bio")
-        index = user_manager.get_current_index(user_id, "bio")
-        await self.send_content(update, "bio", index)
-        user_manager.increment_usage(user_id, "bio")
+        logger.info(f"Bio section accessed by user {user_id}")
+        
+        try:
+            if not await self.check_access(update, "bio"):
+                logger.warning(f"Access denied to bio section for user {user_id}")
+                return
+            
+            user_manager.set_current_section(user_id, "bio")
+            index = user_manager.get_current_index(user_id, "bio")
+            logger.info(f"Sending bio content - user: {user_id}, index: {index}")
+            
+            content = content_manager.get_content("bio", index)
+            if not content:
+                logger.error(f"No bio content found at index {index}")
+                await update.callback_query.answer("محتوای مورد نظر یافت نشد", show_alert=True)
+                return
+
+            section_size = content_manager.get_section_size("bio")
+            message = f"{content.text}\n\n{index + 1} از {section_size}"
+            
+            await update.callback_query.message.edit_text(
+                text=message,
+                reply_markup=self.get_navigation_keyboard(),
+                parse_mode=ParseMode.HTML
+            )
+            logger.info(f"Bio content sent successfully to user {user_id}")
+            
+            user_manager.increment_usage(user_id, "bio")
+            logger.info(f"Bio usage incremented for user {user_id}")
+            
+        except Exception as e:
+            logger.error(f"Error in handle_bio - user: {user_id}, error: {str(e)}")
+            await update.callback_query.answer("خطا در نمایش محتوا. لطفاً دوباره تلاش کنید.", show_alert=True)
 
     async def handle_roadmap(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle roadmap section"""
