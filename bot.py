@@ -88,47 +88,54 @@ class MillionishoBot:
         
         # Error handler
         self.application.add_error_handler(self.error_handler)
-        
+    
         logger.info("All handlers have been set up")
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Central callback handler"""
         user_id = str(update.effective_user.id)
         callback_data = update.callback_query.data
-        logger.debug(f"Callback received - user_id: {user_id}, data: {callback_data}")
+        logger.info(f"Callback received - user_id: {user_id}, data: {callback_data}")
 
-        # Admin callbacks
-        if callback_data.startswith("admin_"):
-            await self.handle_admin_callback(update, context)
-            return
-
-        # Other callbacks based on the pattern
-        handlers = {
-            "^template$": self.handle_template,
-            "^text_template$": self.handle_text_template,
-            "^image_template$": self.handle_image_template,
-            "^tutorial": self.handle_tutorial,
-            "^next": self.handle_next,
-            "^back": self.handle_back,
-            "^main_menu$": self.handle_main_menu,
-            "^reels_idea$": self.handle_reels_idea,
-            "^call_to_action$": self.handle_call_to_action,
-            "^caption$": self.handle_caption,
-            "^complete_idea$": self.handle_complete_idea,
-            "^interactive_story$": self.handle_interactive_story,
-            "^bio$": self.handle_bio,
-            "^roadmap$": self.handle_roadmap,
-            "^all_files$": self.handle_all_files,
-            "^vip$": self.handle_vip,
-            "^favorites$": self.handle_favorites,
-        }
-
-        for pattern, handler in handlers.items():
-            if callback_data.startswith(pattern.strip("^")):
-                await handler(update, context)
+        try:
+            # Admin callbacks
+            if callback_data.startswith("admin_"):
+                await self.handle_admin_callback(update, context)
                 return
 
-        logger.warning(f"Unhandled callback data: {callback_data}")
+            # Direct matches
+            direct_handlers = {
+                "template": self.handle_template,
+                "text_template": self.handle_text_template,
+                "image_template": self.handle_image_template,
+                "tutorial": self.handle_tutorial,
+                "next": self.handle_next,
+                "back": self.handle_back,
+                "main_menu": self.handle_main_menu,
+                "reels_idea": self.handle_reels_idea,
+                "call_to_action": self.handle_call_to_action,
+                "caption": self.handle_caption,
+                "complete_idea": self.handle_complete_idea,
+                "interactive_story": self.handle_interactive_story,
+                "bio": self.handle_bio,
+                "roadmap": self.handle_roadmap,
+                "all_files": self.handle_all_files,
+                "vip": self.handle_vip,
+                "favorites": self.handle_favorites,
+            }
+
+            if callback_data in direct_handlers:
+                logger.info(f"Handling callback '{callback_data}' for user {user_id}")
+                await direct_handlers[callback_data](update, context)
+                await update.callback_query.answer()
+                return
+
+            logger.warning(f"Unhandled callback data: {callback_data}")
+            await update.callback_query.answer("این گزینه در حال حاضر در دسترس نیست.", show_alert=True)
+
+        except Exception as e:
+            logger.error(f"Error in callback handler - user: {user_id}, callback: {callback_data}, error: {str(e)}")
+            await update.callback_query.answer("خطایی رخ داد. لطفاً دوباره تلاش کنید.", show_alert=True)
 
     async def check_access(self, update: Update, section: str) -> bool:
         """Check if user has access to the section"""
@@ -210,13 +217,24 @@ class MillionishoBot:
 
     async def handle_template(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle template section"""
-        if not await self.check_access(update, "template"):
-            return
+        user_id = str(update.effective_user.id)
+        logger.info(f"Template section accessed by user {user_id}")
+        
+        try:
+            if not await self.check_access(update, "template"):
+                logger.warning(f"Access denied to template section for user {user_id}")
+                return
+                
+            await update.callback_query.message.edit_text(
+                "لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
+                reply_markup=self.get_template_submenu_keyboard(),
+                parse_mode=ParseMode.HTML
+            )
+            logger.info(f"Template submenu displayed for user {user_id}")
             
-        await update.callback_query.message.edit_text(
-            "لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
-            reply_markup=self.get_template_submenu_keyboard()
-        )
+        except Exception as e:
+            logger.error(f"Error in handle_template - user: {user_id}, error: {str(e)}")
+            await update.callback_query.answer("خطا در نمایش منو. لطفاً دوباره تلاش کنید.", show_alert=True)
 
     async def handle_text_template(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle text template section"""
@@ -266,7 +284,7 @@ class MillionishoBot:
                     tutorial.text,
                     reply_markup=InlineKeyboardMarkup(keyboard),
                     parse_mode=ParseMode.HTML
-                )
+            )
         else:
             await update.callback_query.answer("محتوای آموزشی در دسترس نیست", show_alert=True)
 
@@ -300,10 +318,18 @@ class MillionishoBot:
 
     async def handle_main_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Return to main menu"""
-        await update.callback_query.message.edit_text(
-            MESSAGES["welcome"],
-            reply_markup=self.get_main_menu_keyboard()
-        )
+        user_id = str(update.effective_user.id)
+        logger.info(f"User {user_id} returning to main menu")
+        try:
+            await update.callback_query.message.edit_text(
+                MESSAGES["welcome"],
+                reply_markup=self.get_main_menu_keyboard(),
+                parse_mode=ParseMode.HTML
+            )
+            logger.info(f"Main menu displayed for user {user_id}")
+        except Exception as e:
+            logger.error(f"Error showing main menu - user: {user_id}, error: {str(e)}")
+            await update.callback_query.answer("خطا در نمایش منو. لطفاً دوباره تلاش کنید.", show_alert=True)
 
     async def handle_reels_idea(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle reels idea section"""
