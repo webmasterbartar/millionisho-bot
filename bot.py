@@ -811,6 +811,52 @@ class MillionishoBot:
         except Exception as e:
             logger.error(f"Error in error handler: {e}")
 
+    def run(self):
+        """Run the bot"""
+        logger.info("Starting the bot")
+        self.application.run_polling()
+
+    def get_main_menu_keyboard(self) -> InlineKeyboardMarkup:
+        """Create main menu keyboard"""
+        keyboard = []
+        buttons = list(MAIN_MENU_BUTTONS.items())
+        
+        # Create rows of 2 buttons each
+        for i in range(0, len(buttons), 2):
+            row = []
+            for key, text in buttons[i:i+2]:
+                row.append(InlineKeyboardButton(text, callback_data=key))
+            keyboard.append(row)
+            
+        return InlineKeyboardMarkup(keyboard)
+
+    def get_template_submenu_keyboard(self) -> InlineKeyboardMarkup:
+        """Create template submenu keyboard"""
+        keyboard = []
+        for key, text in TEMPLATE_SUBMENU_BUTTONS.items():
+            keyboard.append([InlineKeyboardButton(text, callback_data=key)])
+        return InlineKeyboardMarkup(keyboard)
+
+    def get_navigation_keyboard(self, show_tutorial: bool = True) -> InlineKeyboardMarkup:
+        """Create navigation keyboard"""
+        keyboard = []
+        nav_row = []
+        
+        if "back" in NAVIGATION_BUTTONS:
+            nav_row.append(InlineKeyboardButton(NAVIGATION_BUTTONS["back"], callback_data="back"))
+        if "next" in NAVIGATION_BUTTONS:
+            nav_row.append(InlineKeyboardButton(NAVIGATION_BUTTONS["next"], callback_data="next"))
+        
+        if nav_row:
+            keyboard.append(nav_row)
+            
+        if show_tutorial:
+            keyboard.append([InlineKeyboardButton("توضیحات و آموزش", callback_data="tutorial")])
+            
+        keyboard.append([InlineKeyboardButton(NAVIGATION_BUTTONS["back_to_main"], callback_data="main_menu")])
+        
+        return InlineKeyboardMarkup(keyboard)
+
 if __name__ == "__main__":
     # Create and run bot
     bot = MillionishoBot()
