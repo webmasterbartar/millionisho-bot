@@ -159,134 +159,111 @@ class MillionishoBot:
                 
         return True
 
-    async def send_content(self, update: Update, section: str, index: int) -> None:
+    async def send_content(self, update: Update, section: str, index: int, edit_message: bool = True) -> None:
         """Send content to user with appropriate format and keyboard"""
-        content = content_manager.get_content(section, index)
-        if not content:
-            await update.callback_query.answer("محتوای مورد نظر یافت نشد", show_alert=True)
-            return
-
-        section_size = content_manager.get_section_size(section)
-        message = f"{content.text}\n\n{index + 1} از {section_size}"
-        
-        # Handle different media types
-        if content.media_path and content.media_type:
-            if content.media_type == "photo":
-                await update.callback_query.message.reply_photo(
-                    photo=content.media_path,
-                    caption=message,
-                    reply_markup=self.get_navigation_keyboard()
-                )
-            elif content.media_type == "video":
-                await update.callback_query.message.reply_video(
-                    video=content.media_path,
-                    caption=message,
-                    reply_markup=self.get_navigation_keyboard()
-                )
-            elif content.media_type == "voice":
-                await update.callback_query.message.reply_voice(
-                    voice=content.media_path,
-                    caption=message,
-                    reply_markup=self.get_navigation_keyboard()
-                )
-        else:
-            await update.callback_query.message.edit_text(
-                text=message,
-                reply_markup=self.get_navigation_keyboard(),
-                parse_mode=ParseMode.HTML
-            )
-
-    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /start command"""
         user_id = str(update.effective_user.id)
-        user_manager.init_user(user_id)
-        await update.message.reply_text(
-            MESSAGES["welcome"],
-            reply_markup=self.get_main_menu_keyboard()
-        )
-
-    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /help command"""
-        await update.message.reply_text(
-            "لطفاً دستورات زیر را در اختیار دارید:\n\n"
-            "/start - شروع کردن با ربات\n"
-            "/help - دریافت دستورات\n"
-            "/save - ذخیره محتوای اضافه شده برای ادمین\n\n"
-            "برای دسترسی به پنل ادمین، دستور !admin را ارسال کنید."
-        )
-
-    async def handle_template(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle template section"""
-        user_id = str(update.effective_user.id)
-        logger.info(f"Template section accessed by user {user_id}")
+        logger.info(f"Sending content - user: {user_id}, section: {section}, index: {index}")
         
         try:
-            if not await self.check_access(update, "template"):
-                logger.warning(f"Access denied to template section for user {user_id}")
+            # Get content
+            content = content_manager.get_content(section, index)
+            if not content:
+                logger.error(f"Content not found - section: {section}, index: {index}")
+                await update.callback_query.answer("محتوای مورد نظر یافت نشد", show_alert=True)
                 return
-                
-            await update.callback_query.message.edit_text(
-                "لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
-                reply_markup=self.get_template_submenu_keyboard(),
-                parse_mode=ParseMode.HTML
-            )
-            logger.info(f"Template submenu displayed for user {user_id}")
+
+            # Get section size and prepare message
+            section_size = content_manager.get_section_size(section)
+            message = f"{content.text}\n\n{index + 1} از {section_size}"
+            keyboard = self.get_navigation_keyboard()
+
+            # Handle media content
+            if content.media_path and content.media_type:
+                try:
+                    if edit_message:
+                        if content.media_type == "photo":
+                            await update.callback_query.message.edit_media(
+                                media=InputMediaPhoto(content.media_path, caption=message),
+                                reply_markup=keyboard
+                            )
+                        elif content.media_type == "video":
+                            await update.callback_query.message.edit_media(
+                                media=InputMediaVideo(content.media_path, caption=message),
+                                reply_markup=keyboard
+                            )
+                    else:
+                        if content.media_type == "photo":
+                            await update.callback_query.message.reply_photo(
+                                photo=content.media_path,
+                                caption=message,
+                                reply_markup=keyboard
+                            )
+                        elif content.media_type == "video":
+                            await update.callback_query.message.reply_video(
+                                video=content.media_path,
+                                caption=message,
+                                reply_markup=keyboard
+                            )
+                except Exception as e:
+                    logger.error(f"Error sending media content: {str(e)}")
+                    # Fallback to text-only if media fails
+                    await update.callback_query.message.edit_text(
+                        text=message,
+                        reply_markup=keyboard,
+                        parse_mode=ParseMode.HTML
+                    )
+            else:
+                # Text-only content
+                if edit_message:
+                    await update.callback_query.message.edit_text(
+                        text=message,
+                        reply_markup=keyboard,
+                        parse_mode=ParseMode.HTML
+                    )
+                else:
+                    await update.callback_query.message.reply_text(
+                        text=message,
+                        reply_markup=keyboard,
+                        parse_mode=ParseMode.HTML
+                    )
+
+            logger.info(f"Content sent successfully - user: {user_id}, section: {section}, index: {index}")
             
         except Exception as e:
-            logger.error(f"Error in handle_template - user: {user_id}, error: {str(e)}")
-            await update.callback_query.answer("خطا در نمایش منو. لطفاً دوباره تلاش کنید.", show_alert=True)
-
-    async def handle_text_template(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle text template section"""
-        user_id = str(update.effective_user.id)
-        if not await self.check_access(update, "text_template"):
-            return
-
-        user_manager.set_current_section(user_id, "text_template")
-        index = user_manager.get_current_index(user_id, "text_template")
-        await self.send_content(update, "text_template", index)
-        user_manager.increment_usage(user_id, "template")
-
-    async def handle_image_template(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle image template section"""
-        user_id = str(update.effective_user.id)
-        if not await self.check_access(update, "image_template"):
-            return
-            
-        user_manager.set_current_section(user_id, "image_template")
-        index = user_manager.get_current_index(user_id, "image_template")
-        await self.send_content(update, "image_template", index)
-        user_manager.increment_usage(user_id, "template")
-
-    async def handle_tutorial(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle tutorial section"""
-        user_id = str(update.effective_user.id)
-        current_section = user_manager.get_current_section(user_id)
-        
-        if not await self.check_access(update, "tutorial"):
-            return
-            
-        tutorial = content_manager.get_tutorial(current_section)
-        if tutorial:
-            keyboard = [[
-                InlineKeyboardButton(NAVIGATION_BUTTONS["back"], callback_data="back"),
-                InlineKeyboardButton(NAVIGATION_BUTTONS["back_to_main"], callback_data="main_menu")
-            ]]
-            
-            if tutorial.media_path and tutorial.media_type == "document":
-                await update.callback_query.message.reply_document(
-                    document=tutorial.media_path,
-                    caption=tutorial.text,
-                    reply_markup=InlineKeyboardMarkup(keyboard)
-                )
-            else:
-                await update.callback_query.message.edit_text(
-                    tutorial.text,
-                    reply_markup=InlineKeyboardMarkup(keyboard),
-                    parse_mode=ParseMode.HTML
+            logger.error(f"Error in send_content - user: {user_id}, error: {str(e)}")
+            await update.callback_query.answer(
+                "خطا در نمایش محتوا. لطفاً به منوی اصلی برگردید و دوباره تلاش کنید.",
+                show_alert=True
             )
-        else:
-            await update.callback_query.answer("محتوای آموزشی در دسترس نیست", show_alert=True)
+
+    async def handle_section_content(self, update: Update, context: ContextTypes.DEFAULT_TYPE, section: str) -> None:
+        """Generic handler for all content sections"""
+        user_id = str(update.effective_user.id)
+        logger.info(f"Section {section} accessed by user {user_id}")
+        
+        try:
+            if not await self.check_access(update, section):
+                logger.warning(f"Access denied to section {section} for user {user_id}")
+                return
+
+            # Initialize user state
+            user_manager.set_current_section(user_id, section)
+            index = user_manager.get_current_index(user_id, section)
+            
+            # Send content
+            await self.send_content(update, section, index)
+            
+            # Update usage statistics
+            if section in FREE_LIMITS:
+                user_manager.increment_usage(user_id, section)
+                logger.info(f"Usage incremented for section {section} - user: {user_id}")
+                
+        except Exception as e:
+            logger.error(f"Error in handle_section_content - user: {user_id}, section: {section}, error: {str(e)}")
+            await update.callback_query.answer(
+                "خطا در دسترسی به محتوا. لطفاً دوباره تلاش کنید.",
+                show_alert=True
+            )
 
     async def handle_next(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle next button"""
@@ -297,60 +274,35 @@ class MillionishoBot:
             current_section = user_manager.get_current_section(user_id)
             if not current_section:
                 logger.warning(f"No current section found for user {user_id}")
-                await update.callback_query.answer("لطفاً ابتدا یک بخش را انتخاب کنید.", show_alert=True)
+                await update.callback_query.answer(
+                    "لطفاً ابتدا یک بخش را انتخاب کنید.",
+                    show_alert=True
+                )
                 return
-                
-            logger.info(f"Current section for user {user_id}: {current_section}")
+
             current_index = user_manager.get_current_index(user_id, current_section)
             section_size = content_manager.get_section_size(current_section)
             
             if section_size == 0:
                 logger.error(f"No content found in section {current_section}")
-                await update.callback_query.answer("محتوایی در این بخش وجود ندارد.", show_alert=True)
-                return
-            
-            next_index = (current_index + 1) % section_size
-            logger.info(f"Moving from index {current_index} to {next_index} in section {current_section}")
-            
-            content = content_manager.get_content(current_section, next_index)
-            if not content:
-                logger.error(f"Content not found at index {next_index} in section {current_section}")
-                await update.callback_query.answer("محتوای مورد نظر یافت نشد.", show_alert=True)
-                return
-            
-            message = f"{content.text}\n\n{next_index + 1} از {section_size}"
-            
-            # Handle different media types
-            if content.media_path and content.media_type:
-                if content.media_type == "photo":
-                    await update.callback_query.message.edit_media(
-                        media=InputMediaPhoto(
-                            media=content.media_path,
-                            caption=message
-                        ),
-                        reply_markup=self.get_navigation_keyboard()
-                    )
-                elif content.media_type == "video":
-                    await update.callback_query.message.edit_media(
-                        media=InputMediaVideo(
-                            media=content.media_path,
-                            caption=message
-                        ),
-                        reply_markup=self.get_navigation_keyboard()
-                    )
-            else:
-                await update.callback_query.message.edit_text(
-                    text=message,
-                    reply_markup=self.get_navigation_keyboard(),
-                    parse_mode=ParseMode.HTML
+                await update.callback_query.answer(
+                    "محتوایی در این بخش وجود ندارد.",
+                    show_alert=True
                 )
-            
+                return
+
+            next_index = (current_index + 1) % section_size
             user_manager.set_current_index(user_id, current_section, next_index)
-            logger.info(f"Successfully displayed next content for user {user_id}")
+            
+            await self.send_content(update, current_section, next_index)
+            logger.info(f"Next content displayed - user: {user_id}, section: {current_section}, index: {next_index}")
             
         except Exception as e:
             logger.error(f"Error in handle_next - user: {user_id}, error: {str(e)}")
-            await update.callback_query.answer("خطا در نمایش محتوای بعدی. لطفاً دوباره تلاش کنید.", show_alert=True)
+            await update.callback_query.answer(
+                "خطا در نمایش محتوای بعدی. لطفاً به منوی اصلی برگردید و دوباره تلاش کنید.",
+                show_alert=True
+            )
 
     async def handle_back(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle back button"""
@@ -361,60 +313,35 @@ class MillionishoBot:
             current_section = user_manager.get_current_section(user_id)
             if not current_section:
                 logger.warning(f"No current section found for user {user_id}")
-                await update.callback_query.answer("لطفاً ابتدا یک بخش را انتخاب کنید.", show_alert=True)
+                await update.callback_query.answer(
+                    "لطفاً ابتدا یک بخش را انتخاب کنید.",
+                    show_alert=True
+                )
                 return
-                
-            logger.info(f"Current section for user {user_id}: {current_section}")
+
             current_index = user_manager.get_current_index(user_id, current_section)
             section_size = content_manager.get_section_size(current_section)
             
             if section_size == 0:
                 logger.error(f"No content found in section {current_section}")
-                await update.callback_query.answer("محتوایی در این بخش وجود ندارد.", show_alert=True)
-                return
-            
-            prev_index = (current_index - 1) % section_size
-            logger.info(f"Moving from index {current_index} to {prev_index} in section {current_section}")
-            
-            content = content_manager.get_content(current_section, prev_index)
-            if not content:
-                logger.error(f"Content not found at index {prev_index} in section {current_section}")
-                await update.callback_query.answer("محتوای مورد نظر یافت نشد.", show_alert=True)
-                return
-            
-            message = f"{content.text}\n\n{prev_index + 1} از {section_size}"
-            
-            # Handle different media types
-            if content.media_path and content.media_type:
-                if content.media_type == "photo":
-                    await update.callback_query.message.edit_media(
-                        media=InputMediaPhoto(
-                            media=content.media_path,
-                            caption=message
-                        ),
-                        reply_markup=self.get_navigation_keyboard()
-                    )
-                elif content.media_type == "video":
-                    await update.callback_query.message.edit_media(
-                        media=InputMediaVideo(
-                            media=content.media_path,
-                            caption=message
-                        ),
-                        reply_markup=self.get_navigation_keyboard()
-                    )
-            else:
-                await update.callback_query.message.edit_text(
-                    text=message,
-                    reply_markup=self.get_navigation_keyboard(),
-                    parse_mode=ParseMode.HTML
+                await update.callback_query.answer(
+                    "محتوایی در این بخش وجود ندارد.",
+                    show_alert=True
                 )
-            
+                return
+
+            prev_index = (current_index - 1) % section_size
             user_manager.set_current_index(user_id, current_section, prev_index)
-            logger.info(f"Successfully displayed previous content for user {user_id}")
+            
+            await self.send_content(update, current_section, prev_index)
+            logger.info(f"Previous content displayed - user: {user_id}, section: {current_section}, index: {prev_index}")
             
         except Exception as e:
             logger.error(f"Error in handle_back - user: {user_id}, error: {str(e)}")
-            await update.callback_query.answer("خطا در نمایش محتوای قبلی. لطفاً دوباره تلاش کنید.", show_alert=True)
+            await update.callback_query.answer(
+                "خطا در نمایش محتوای قبلی. لطفاً به منوی اصلی برگردید و دوباره تلاش کنید.",
+                show_alert=True
+            )
 
     async def handle_main_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Return to main menu"""
@@ -433,94 +360,27 @@ class MillionishoBot:
 
     async def handle_reels_idea(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle reels idea section"""
-        user_id = str(update.effective_user.id)
-        if not await self.check_access(update, "reels_idea"):
-            return
-            
-        user_manager.set_current_section(user_id, "reels_idea")
-        index = user_manager.get_current_index(user_id, "reels_idea")
-        await self.send_content(update, "reels_idea", index)
-        user_manager.increment_usage(user_id, "reels_idea")
+        await self.handle_section_content(update, context, "reels_idea")
 
     async def handle_call_to_action(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle call to action section"""
-        user_id = str(update.effective_user.id)
-        if not await self.check_access(update, "call_to_action"):
-            return
-            
-        user_manager.set_current_section(user_id, "call_to_action")
-        index = user_manager.get_current_index(user_id, "call_to_action")
-        await self.send_content(update, "call_to_action", index)
-        user_manager.increment_usage(user_id, "call_to_action")
+        await self.handle_section_content(update, context, "call_to_action")
 
     async def handle_caption(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle caption section"""
-        user_id = str(update.effective_user.id)
-        if not await self.check_access(update, "caption"):
-            return
-            
-        user_manager.set_current_section(user_id, "caption")
-        index = user_manager.get_current_index(user_id, "caption")
-        await self.send_content(update, "caption", index)
-        user_manager.increment_usage(user_id, "caption")
+        await self.handle_section_content(update, context, "caption")
 
     async def handle_complete_idea(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle complete idea section"""
-        user_id = str(update.effective_user.id)
-        if not await self.check_access(update, "complete_idea"):
-            return
-        
-        user_manager.set_current_section(user_id, "complete_idea")
-        index = user_manager.get_current_index(user_id, "complete_idea")
-        await self.send_content(update, "complete_idea", index)
+        await self.handle_section_content(update, context, "complete_idea")
 
     async def handle_interactive_story(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle interactive story section"""
-        user_id = str(update.effective_user.id)
-        if not await self.check_access(update, "interactive_story"):
-            return
-            
-        user_manager.set_current_section(user_id, "interactive_story")
-        index = user_manager.get_current_index(user_id, "interactive_story")
-        await self.send_content(update, "interactive_story", index)
-        user_manager.increment_usage(user_id, "interactive_story")
+        await self.handle_section_content(update, context, "interactive_story")
 
     async def handle_bio(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle bio section"""
-        user_id = str(update.effective_user.id)
-        logger.info(f"Bio section accessed by user {user_id}")
-        
-        try:
-            if not await self.check_access(update, "bio"):
-                logger.warning(f"Access denied to bio section for user {user_id}")
-                return
-            
-            user_manager.set_current_section(user_id, "bio")
-            index = user_manager.get_current_index(user_id, "bio")
-            logger.info(f"Sending bio content - user: {user_id}, index: {index}")
-            
-            content = content_manager.get_content("bio", index)
-            if not content:
-                logger.error(f"No bio content found at index {index}")
-                await update.callback_query.answer("محتوای مورد نظر یافت نشد", show_alert=True)
-                return
-
-            section_size = content_manager.get_section_size("bio")
-            message = f"{content.text}\n\n{index + 1} از {section_size}"
-            
-            await update.callback_query.message.edit_text(
-                text=message,
-                reply_markup=self.get_navigation_keyboard(),
-                parse_mode=ParseMode.HTML
-            )
-            logger.info(f"Bio content sent successfully to user {user_id}")
-            
-            user_manager.increment_usage(user_id, "bio")
-            logger.info(f"Bio usage incremented for user {user_id}")
-            
-        except Exception as e:
-            logger.error(f"Error in handle_bio - user: {user_id}, error: {str(e)}")
-            await update.callback_query.answer("خطا در نمایش محتوا. لطفاً دوباره تلاش کنید.", show_alert=True)
+        await self.handle_section_content(update, context, "bio")
 
     async def handle_roadmap(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle roadmap section"""
