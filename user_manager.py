@@ -90,5 +90,34 @@ class UserManager:
             return True
         return False
 
+    def can_access_section(self, user_id: int, section: str) -> bool:
+        """Check if user can access a section"""
+        # Admins always have access
+        if self.is_admin(user_id):
+            return True
+            
+        user = self.get_user(user_id)
+        
+        # Free sections that don't require VIP
+        free_sections = ["text_template", "image_template"]
+        if section in free_sections:
+            return True
+        
+        # VIP users have access to all sections
+        if user["vip"]:
+            return True
+        
+        # All users have unlimited access to all sections
+        return True
+    
+    def increment_usage(self, user_id: int, section: str) -> None:
+        """Increment usage count for a section"""
+        # Don't increment usage for admins
+        if self.is_admin(user_id):
+            return
+            
+        # Don't increment usage for anyone - unlimited access
+        return
+
 # Global instance
 user_manager = UserManager() 
