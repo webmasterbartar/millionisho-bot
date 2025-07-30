@@ -30,7 +30,7 @@ class Millionisho_Licensing {
         return self::$instance;
     }
     
-    private function __construct() {
+    public function __construct() {
         // Add menu
         add_action('admin_menu', array($this, 'add_admin_menu'));
         
@@ -40,27 +40,43 @@ class Millionisho_Licensing {
         // Add order completed hook
         add_action('woocommerce_order_status_completed', array($this, 'check_order_completion'));
         
-        // Add account endpoint
+        // Add account endpoint and menu item
         add_action('init', array($this, 'add_endpoints'));
         add_filter('query_vars', array($this, 'add_query_vars'), 0);
-        
-        // Add menu item to My Account menu
-        add_filter('woocommerce_account_menu_items', array($this, 'add_license_account_menu_item'));
+        add_filter('woocommerce_account_menu_items', array($this, 'add_license_account_menu_item'), 10);
         add_action('woocommerce_account_millionisho-license_endpoint', array($this, 'license_account_content'));
         
         // Register REST API endpoint
         add_action('rest_api_init', array($this, 'register_rest_api'));
+        
+        // Add activation hook
+        register_activation_hook(__FILE__, array($this, 'plugin_activate'));
+        
+        // Add init hook for checking version
+        add_action('init', array($this, 'check_version'));
+    }
+    
+    public function plugin_activate() {
+        // Add the endpoint
+        $this->add_endpoints();
+        
+        // Flush rewrite rules
+        flush_rewrite_rules();
+        
+        // Save initial version
+        update_option('millionisho_licensing_version', MILLIONISHO_LICENSING_VERSION);
+    }
+    
+    public function check_version() {
+        if (get_option('millionisho_licensing_version') !== MILLIONISHO_LICENSING_VERSION) {
+            $this->add_endpoints();
+            flush_rewrite_rules();
+            update_option('millionisho_licensing_version', MILLIONISHO_LICENSING_VERSION);
+        }
     }
     
     public function add_endpoints() {
         add_rewrite_endpoint('millionisho-license', EP_ROOT | EP_PAGES);
-        
-        // Flush rewrite rules if needed
-        $option_version = get_option('millionisho_licensing_version', '0');
-        if ($option_version !== MILLIONISHO_LICENSING_VERSION) {
-            flush_rewrite_rules();
-            update_option('millionisho_licensing_version', MILLIONISHO_LICENSING_VERSION);
-        }
     }
     
     public function add_query_vars($vars) {
@@ -285,13 +301,14 @@ class Millionisho_Licensing {
     }
     
     public function add_license_account_menu_item($items) {
+        // Add our custom item
         $new_items = array();
         
-        // Insert our custom item after the Dashboard
+        // Add the license key item after dashboard
         foreach ($items as $key => $value) {
             $new_items[$key] = $value;
             if ($key === 'dashboard') {
-                $new_items['millionisho-license'] = __('License Key', 'millionisho-licensing');
+                $new_items['millionisho-license'] = 'کد لایسنس';
             }
         }
         
