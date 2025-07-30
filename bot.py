@@ -2,7 +2,7 @@ import os
 import json
 import logging
 from typing import Dict, Optional
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo, ForceReply
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -12,6 +12,7 @@ from telegram.ext import (
     filters,
 )
 from telegram.constants import ParseMode
+import aiohttp
 
 from config import (
     TELEGRAM_TOKEN,
@@ -490,36 +491,43 @@ class MillionishoBot:
         await update.message.reply_text("محتوا با موفقیت ذخیره شد.")
 
     async def handle_activation_code(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle activation code entry"""
-        user_id = str(update.effective_user.id)
-        self.current_action[user_id] = "activate_code"
-        await update.callback_query.message.edit_text(
-            "لطفاً کد فعال‌سازی خود را وارد کنید:",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton(NAVIGATION_BUTTONS["back_to_main"], callback_data="main_menu")
-            ]])
+        """Handle /activate command"""
+        await update.message.reply_text(
+            "لطفاً کد لایسنس خود را وارد کنید:",
+            reply_markup=ForceReply()
         )
 
     async def handle_activation_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle activation code input"""
-        user_id = str(update.effective_user.id)
-        if self.current_action.get(user_id) != "activate_code":
-            return
-            
-        activation_code = update.message.text.strip()
-        if user_manager.activate_vip(user_id, activation_code):
-            await update.message.reply_text(
-                "تبریک! اشتراک VIP شما با موفقیت فعال شد.",
-                reply_markup=self.get_main_menu_keyboard()
-            )
-        else:
-            await update.message.reply_text(
-                "کد فعال‌سازی نامعتبر است. لطفاً مجدداً تلاش کنید.",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton(NAVIGATION_BUTTONS["back_to_main"], callback_data="main_menu")
-                ]])
-            )
-        self.current_action.pop(user_id)
+        """Handle license key input"""
+        user_id = update.message.from_user.id
+        license_key = update.message.text.strip()
+        
+        # Verify license with WordPress site
+        async with aiohttp.ClientSession() as session:
+            try:
+                params = {'key': license_key}
+                async with session.get('https://millionisho.com/wp-json/licensing/v1/verify', params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if data.get('status') == 'valid':
+                            # Activate VIP status
+                            user_manager.activate_vip(user_id)
+                            await update.message.reply_text(
+                                "✅ کد لایسنس شما با موفقیت فعال شد!\n"
+                                "اکنون می‌توانید به تمام محتوا دسترسی داشته باشید."
+                            )
+                            return
+                
+                await update.message.reply_text(
+                    "❌ کد لایسنس نامعتبر است.\n"
+                    "لطفاً از صحت کد وارد شده اطمینان حاصل کنید."
+                )
+            except Exception as e:
+                logging.error(f"Error verifying license: {e}")
+                await update.message.reply_text(
+                    "❌ خطا در بررسی کد لایسنس.\n"
+                    "لطفاً دوباره تلاش کنید."
+                )
 
     async def handle_admin_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle !admin command"""
@@ -823,10 +831,50 @@ class MillionishoBot:
         except Exception as e:
             logger.error(f"Error in error handler: {e}")
 
-    def run(self):
+    def run(self) -> None:
         """Run the bot"""
-        logger.info("Starting the bot")
-        self.application.run_polling()
+        app = Application.builder().token(TELEGRAM_TOKEN).build()
+
+        # Add handlers
+        app.add_handler(CommandHandler("start", self.start_command))
+        app.add_handler(CommandHandler("help", self.help_command))
+        app.add_handler(CommandHandler("activate", self.handle_activation_code))
+        
+        # Add message handlers
+        app.add_handler(MessageHandler(
+            filters.TEXT & filters.REPLY & ~filters.COMMAND,
+            self.handle_activation_input
+        ))
+        
+        # Command handlers
+        app.add_handler(CommandHandler("start", self.start_command))
+        app.add_handler(CommandHandler("help", self.help_command))
+        app.add_handler(CommandHandler("save", self.save_command))
+        
+        # Text handler for admin command
+        app.add_handler(MessageHandler(
+            filters.TEXT & filters.Regex("^!admin$"),
+            self.handle_admin_command
+        ))
+        
+        # General text handler
+        app.add_handler(MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            self.handle_text_input
+        ))
+        
+        # Media handlers
+        app.add_handler(MessageHandler(filters.PHOTO, self.handle_photo))
+        app.add_handler(MessageHandler(filters.VIDEO, self.handle_video))
+        app.add_handler(MessageHandler(filters.Document.ALL, self.handle_document))
+        
+        # Callback handlers
+        app.add_handler(CallbackQueryHandler(self.handle_callback))
+        
+        # Error handler
+        app.add_error_handler(self.error_handler)
+    
+        logger.info("All handlers have been set up")
 
     def get_main_menu_keyboard(self) -> InlineKeyboardMarkup:
         """Create main menu keyboard"""
